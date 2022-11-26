@@ -46,6 +46,22 @@ RULE_TABLE_set_data(rule_table_t *table,
                     size_t data_length);
 
 /**
+ * @brief Dump the table to a given buffer
+ * 
+ * @param[in] Table to set the data to 
+ * @param[out] buffer The dumped table buffer
+ * @param[inout] buffer_size_inout Contains the initial length of buffer param,
+ *               will hold the number of bytes that actually were written
+ *
+ * @return TRUE on success, FALSE if failed to write due to insufficient space
+ */
+bool_t
+RULE_TABLE_dump_data(const rule_table_t *table,
+                     uint8_t *buffer,
+                     size_t *buffer_size_inout);
+
+
+/**
  * @brief Match a given packet against the whole rule table, and return the
  *        required action
  * 

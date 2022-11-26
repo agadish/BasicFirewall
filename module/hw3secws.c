@@ -13,6 +13,7 @@
 #include <asm/string.h>
 
 #include "common.h"
+#include "rule_table.h"
 
 
 /*   K E R N E L   A T T R I B U T E S   */
@@ -117,8 +118,9 @@ static struct device *g_sysfs_rules_device = NULL;
 static bool_t g_has_sysfs_rules_device = FALSE;
 static struct device *g_sysfs_log_reset_device = NULL;
 static bool_t g_has_sysfs_log_reset_device = FALSE;
+static rule_table_t g_rule_table;
 
-static DEVICE_ATTR(rules, S_IWUSR | S_IRUGO , rules_display, rules_modify); 
+static DEVICE_ATTR(rules, S_IWUSR | S_IRUGO, rules_display, rules_modify); 
 static DEVICE_ATTR(log_reset, S_IWUSR, NULL, log_modify); 
 
 
@@ -239,15 +241,15 @@ init_drivers(void)
     /* g_has_sysfs_log_reset_device = TRUE; */
 
     /* 4.2. Create file attributes */
-    result_device_create_file = device_create_file(
-        g_sysfs_log_reset_device,
-        (const struct device_attribute *)&dev_attr_log_reset.attr
-    );
-    if (0 != result_device_create_file) {
-        result = -1;
-        goto l_cleanup;
-    }
-
+    /* result_device_create_file = device_create_file( */
+    /*     g_sysfs_log_reset_device, */
+    /*     (const struct device_attribute *)&dev_attr_log_reset.attr */
+    /* ); */
+    /* if (0 != result_device_create_file) { */
+    /*     result = -1; */
+    /*     goto l_cleanup; */
+    /* } */
+    /*  */
         
     /* Success */
     result = 0;
@@ -302,36 +304,45 @@ unregister_hooks(void)
 static ssize_t
 rules_display(struct device *dev, struct device_attribute *attr, char *buf)
 {
-    int result_scnprintf = -1;
-    char message[] = "hello from rules_display";
+    ssize_t result = -1;
+    size_t buffer_length = PAGE_SIZE;
+    bool_t was_modified = FALSE;
 
     UNUSED_ARG(dev);
     UNUSED_ARG(attr);
 
+    printk(KERN_INFO "rules_display\tgot %lu rules\n", (unsigned long)g_rule_table.rules_count);
 
-    printk(KERN_INFO "%s was called\n", __func__);
-    strcpy(buf, message);
+    was_modified = RULE_TABLE_dump_data(&g_rule_table, buf, &buffer_length);
+    if (FALSE == was_modified) {
+        result = -1;
+        goto l_cleanup;
+    }
 
-    result_scnprintf = strlen(message);
-    return result_scnprintf;
+
+    printk(KERN_INFO "rules_display\tcopied %lu bytes\n", (unsigned long)buffer_length);
+    result = (ssize_t)buffer_length;
+l_cleanup:
+
+    return result;
 }
 
 static ssize_t
 rules_modify(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
     ssize_t result = 0;
+    bool_t was_modified = FALSE;
 
-    printk(KERN_INFO "%s was called\n", __func__);
-    if (0 == count) {
-        goto l_cleanup;
-    }
+    /* printk(KERN_INFO "%s was called\n", __func__); */
+    /* if (0 == count) { */
+    /*     goto l_cleanup; */
+    /* } */
 
-    if ('0' == buf[0]) {
-        zero_counters();
+    was_modified = RULE_TABLE_set_data(&g_rule_table, buf, count);
+    if (was_modified) {
         result = count;
     }
 
-l_cleanup:
 
     return result;
 }
@@ -361,13 +372,16 @@ __init hw3secws_init(void)
 {
     int result = -1;
 
-    /* 1. Register hooks */
+    /* 1. Init globals */
+    RULE_TABLE_init(&g_rule_table);
+
+    /* 2. Register hooks */
     result = register_hooks();
     if (0 != result) {
         goto l_cleanup;
     }
 
-    /* 2. Init char device and sysfs device */
+    /* 3. Init char device and sysfs device */
     result = init_drivers();
     if (0 != result) {
         goto l_cleanup;

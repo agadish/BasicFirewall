@@ -93,6 +93,32 @@ l_cleanup:
 }
 
 bool_t
+RULE_TABLE_dump_data(const rule_table_t *table,
+                     uint8_t *buffer,
+                     size_t *buffer_size_inout)
+{
+    bool_t result = FALSE;
+    size_t required_length = 0;
+
+    if ((NULL == table) || (NULL == buffer) || (NULL == buffer_size_inout)) {
+        goto l_cleanup;
+    }
+    
+    required_length = table->rules_count * sizeof(table->rules[0]);
+    if (required_length > *buffer_size_inout) {
+        goto l_cleanup;
+    }
+
+    (void)memcpy(buffer, &table->rules, required_length);
+    *buffer_size_inout = required_length;
+
+    result = TRUE;
+l_cleanup:
+
+    return result;
+}
+
+bool_t
 RULE_TABLE_check(const rule_table_t *table,
                  const struct sk_buff *skb,
                  __u8 *action_out)

@@ -1,15 +1,15 @@
-#ifndef _FW_H_
-#define _FW_H_
+/**
+ * @file main.c
+ * @author Assaf Gadish
+ *
+ * @brief Userpsace port of fw.h
+ *        Written for course "Workshop in Information Security", TAU 2022-23.
+ */
+#ifndef _FW_USER_H_
+#define _FW_USER_H_
 
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/slab.h>
-#include <linux/device.h>
-#include <linux/fs.h>
-#include <linux/netfilter_ipv4.h>
-#include <linux/ip.h>
-#include <linux/tcp.h>
-#include <linux/udp.h>
+/*   I N C L U D E S    */
+#include <stint.h>
 
 
 // the protocols we will work with
@@ -69,18 +69,18 @@ typedef enum {
 typedef struct {
 	char rule_name[20];			// names will be no longer than 20 chars
 	direction_t direction;
-	__be32	src_ip;
-	__be32	src_prefix_mask; 	// e.g., 255.255.255.0 as int in the local endianness
-	__u8    src_prefix_size; 	// valid values: 0-32, e.g., /24 for the example above
+	uint32_t	src_ip;
+	uint32_t	src_prefix_mask; 	// e.g., 255.255.255.0 as int in the local endianness
+	uint8_t    src_prefix_size; 	// valid values: 0-32, e.g., /24 for the example above
 								// (the field is redundant - easier to print)
-	__be32	dst_ip;
-	__be32	dst_prefix_mask; 	// as above
-	__u8    dst_prefix_size; 	// as above	
-	__be16	src_port; 			// number of port or 0 for any or port 1023 for any port number > 1023  
-	__be16	dst_port; 			// number of port or 0 for any or port 1023 for any port number > 1023 
-	__u8	protocol; 			// values from: prot_t
+	uint32_t	dst_ip;
+	uint32_t	dst_prefix_mask; 	// as above
+	uint8_t    dst_prefix_size; 	// as above	
+	uint16_t	src_port; 			// number of port or 0 for any or port 1023 for any port number > 1023  
+	uint16_t	dst_port; 			// number of port or 0 for any or port 1023 for any port number > 1023 
+	uint8_t	protocol; 			// values from: prot_t
 	ack_t	ack; 				// values from: ack_t
-	__u8	action;   			// valid values: NF_ACCEPT, NF_DROP
+	uint8_t	action;   			// valid values: NF_ACCEPT, NF_DROP
 } rule_t;
 
 // logging
@@ -88,10 +88,10 @@ typedef struct {
 	unsigned long  	timestamp;     	// time of creation/update
 	unsigned char  	protocol;     	// values from: prot_t
 	unsigned char  	action;       	// valid values: NF_ACCEPT, NF_DROP
-	__be32   		src_ip;		  	// if you use this struct in userspace, change the type to unsigned int
-	__be32			dst_ip;		  	// if you use this struct in userspace, change the type to unsigned int
-	__be16 			src_port;	  	// if you use this struct in userspace, change the type to unsigned short
-	__be16 			dst_port;	  	// if you use this struct in userspace, change the type to unsigned short
+	uint32_t   		src_ip;		  	// if you use this struct in userspace, change the type to unsigned int
+	uint32_t			dst_ip;		  	// if you use this struct in userspace, change the type to unsigned int
+	uint16_t 			src_port;	  	// if you use this struct in userspace, change the type to unsigned short
+	uint16_t 			dst_port;	  	// if you use this struct in userspace, change the type to unsigned short
 	reason_t     	reason;       	// rule#index, or values from: reason_t
 	unsigned int   	count;        	// counts this line's hits
 } log_row_t;
@@ -103,4 +103,4 @@ typedef struct rule_table_s {
 } rule_table_t;
 
 
-#endif // _FW_H_
+#endif // _FW_USER_H_
