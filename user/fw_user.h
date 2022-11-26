@@ -9,7 +9,7 @@
 #define _FW_USER_H_
 
 /*   I N C L U D E S    */
-#include <stint.h>
+#include <stdint.h>
 
 
 // the protocols we will work with
@@ -56,7 +56,8 @@ typedef enum {
 	ACK_NO 		= 0x01,
 	ACK_YES 	= 0x02,
 	ACK_ANY 	= ACK_NO | ACK_YES,
-} ack_t;
+} ack_e;
+typedef uint8_t ack_t;
 
 typedef enum {
 	DIRECTION_IN 	    = 0x01,
