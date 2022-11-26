@@ -258,15 +258,60 @@ l_cleanup:
 }
 
 static result_t
+process_direction(const char *direction_str, direction_t *direction_out)
+{
+    result_t result = E__UNKNOWN;
+    uint8_t direction = NF_ACCEPT;
+
+    if (0 == strcmp(direction_str, "in")) {
+        direction = DIRECTION_IN;
+    } else if (0 == strcmp(direction_str, "out")) {
+        direction = DIRECTION_OUT;
+    } else if (0 == strcmp(direction_str, "any")) {
+        direction = DIRECTION_ANY;
+    } else {
+        (void)fprintf(stderr, "ERROR: Human rules file contains invalid direction\n");
+        result = E__HUMAN_RULES_INVALID_DIRECTION;
+        goto l_cleanup;
+    }
+
+    *direction_out = direction;
+    result = E__SUCCESS;
+l_cleanup:
+
+    return result;
+}
+
+static prot_t
+process_protocol(const char *protocol_str)
+{
+    uint8_t protocol = NF_ACCEPT;
+
+    if (0 == strcmp(protocol_str, "tcp")) {
+        protocol = PROT_TCP;
+    } else if (0 == strcmp(protocol_str, "udp")) {
+        protocol = PROT_UDP;
+    } else if (0 == strcmp(protocol_str, "icmp")) {
+        protocol = PROT_ICMP;
+    } else if (0 == strcmp(protocol_str, "any")) {
+        protocol = PROT_ANY;
+    } else {
+        protocol = PROT_OTHER;
+    }
+
+    return protocol;
+}
+
+static result_t
 parse_human_to_bin(FILE *file, rule_t *rule_out, bool_t *is_eof_out)
 {
     result_t result = E__UNKNOWN;
     int result_fscanf = -1;
     char name[20] = {0};
-    char iface[32] = {0};
+    char direction[4] = {0};
     char src_ip[IP_STRING_MAX] = {0};
     char dst_ip[IP_STRING_MAX] = {0};
-    char proto[5] = {0};
+    char protocol[5] = {0};
     char sport[6] = {0};
     char dport[6] = {0};
     char ack[4] = {0};
@@ -276,7 +321,7 @@ parse_human_to_bin(FILE *file, rule_t *rule_out, bool_t *is_eof_out)
     result_fscanf = fscanf(
         file,
         "%s %s %s %s %s %s %s %s %s\n",
-        name, iface, src_ip, dst_ip, proto, sport, dport, ack, action
+        name, direction, src_ip, dst_ip, protocol, sport, dport, ack, action
     );
     /* 2. Check if EOF */
     if (EOF == result_fscanf) {
@@ -336,6 +381,20 @@ parse_human_to_bin(FILE *file, rule_t *rule_out, bool_t *is_eof_out)
         goto l_cleanup;
     }
 
+    /* 8. Process direction */
+    result = process_direction(direction, &rule_out->direction);
+    if (E__SUCCESS != result) {
+        goto l_cleanup;
+    }
+
+    /* 9. Process protocol */
+    rule_out->protocol = process_protocol(protocol);
+    if (E__SUCCESS != result) {
+        goto l_cleanup;
+    }
+
+    /* 10. Copy rule name */
+    (void)strncpy(rule_out->rule_name, name, ARRAY_LENGTH(rule_out->rule_name));
 
     *is_eof_out = FALSE;
     result = E__SUCCESS;

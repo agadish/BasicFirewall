@@ -19,7 +19,8 @@ typedef enum {
 	PROT_UDP	= 17,
 	PROT_OTHER 	= 255,
 	PROT_ANY	= 143,
-} prot_t;
+} prot_e;
+typedef uint8_t prot_t;
 
 
 // various reasons to be registered in each log entry
@@ -56,7 +57,8 @@ typedef enum {
 	ACK_NO 		= 0x01,
 	ACK_YES 	= 0x02,
 	ACK_ANY 	= ACK_NO | ACK_YES,
-} ack_t;
+} ack_e;
+typedef __u8 ack_t;
 
 typedef enum {
 	DIRECTION_IN 	    = 0x01,

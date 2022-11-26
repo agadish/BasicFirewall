@@ -333,15 +333,13 @@ rules_modify(struct device *dev, struct device_attribute *attr, const char *buf,
     ssize_t result = 0;
     bool_t was_modified = FALSE;
 
-    /* printk(KERN_INFO "%s was called\n", __func__); */
-    /* if (0 == count) { */
-    /*     goto l_cleanup; */
-    /* } */
+    printk(KERN_INFO "%s was called\n", __func__);
 
     was_modified = RULE_TABLE_set_data(&g_rule_table, buf, count);
     if (was_modified) {
         result = count;
     }
+    printk(KERN_INFO "%s was called, was_modified=%d\n", __func__, was_modified);
 
 
     return result;

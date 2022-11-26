@@ -19,7 +19,8 @@ typedef enum {
 	PROT_UDP	= 17,
 	PROT_OTHER 	= 255,
 	PROT_ANY	= 143,
-} prot_t;
+} prot_e;
+typedef uint8_t prot_t;
 
 
 // various reasons to be registered in each log entry

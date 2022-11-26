@@ -76,10 +76,21 @@ RULE_TABLE_set_data(rule_table_t *table,
                     size_t data_length)
 {
     bool_t result = FALSE;
-    if (0 != data_length % sizeof(rule_t)) {
+    uint8_t rules_count = 0;
+
+    /* 1. Calcualte rules_count */
+    rules_count = data_length / sizeof(table->rules[0]);
+
+    /* 2. Check if length is correct */
+    if (data_length != rules_count * sizeof(table->rules[0])) {
         result = FALSE;
         goto l_cleanup;
     }
+
+    /* 3. Copy rules */
+    // TODO: Verify
+    (void)memcpy(table->rules, data, data_length);
+    table->rules_count = rules_count;
 
     result = TRUE;
 
