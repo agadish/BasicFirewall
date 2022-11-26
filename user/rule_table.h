@@ -20,13 +20,16 @@
 
 /*   F U N C T I O N S   D E C L A R A T I O N S   */
 result_t
-RULE_TABLE_bin_to_human(const char *path, rule_table_t *rule_table_out);
+RULE_TABLE_bin_to_human(rule_table_t *rule_table_out, const char *path);
 
 result_t
-RULE_TABLE_human_to_bin(const char *path, rule_table_t *rule_table_out);
+RULE_TABLE_human_to_bin(rule_table_t *rule_table_out, const char *path);
 
 result_t
 RULE_TABLE_print_table(rule_table_t *rule_table);
+
+result_t
+RULE_TABLE_write_bin(rule_table_t *rule_table, const char *path);
 
 
 #endif /* __RULE_TABLE_H__ */

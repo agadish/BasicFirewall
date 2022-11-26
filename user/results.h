@@ -26,6 +26,7 @@ typedef enum result_e {
     E__HUMAN_RULES_INVALID_PORT,
     E__HUMAN_RULES_INVALID_ACK,
     E__HUMAN_RULES_INVALID_ACTION,
+    E__WRITE_ERROR,
 } result_t;
 
 #endif /* __RESULTS_H__ */

@@ -37,8 +37,7 @@ show_rules(void)
     rule_table_t rule_table = {0};
 
     /* 1. Read rules */
-
-    result = RULE_TABLE_bin_to_human(RULES_FILE_PATH, &rule_table);
+    result = RULE_TABLE_bin_to_human(&rule_table, RULES_FILE_PATH);
     if (E__SUCCESS != result) {
         goto l_cleanup;
     }
@@ -62,7 +61,14 @@ load_rules(const char *rules_path)
     result_t result = E__UNKNOWN;
     rule_table_t rule_table = {0};
 
-    result = RULE_TABLE_human_to_bin(rules_path, &rule_table);
+    /* 1. Read human-rules file and convert to rule_table_t */
+    result = RULE_TABLE_human_to_bin(&rule_table, rules_path);
+    if (E__SUCCESS != result) {
+        goto l_cleanup;
+    }
+
+    /* 2. Write the rules list to the sysfs rules file */
+    result = RULE_TABLE_write_bin(&rule_table, RULES_FILE_PATH);
     if (E__SUCCESS != result) {
         goto l_cleanup;
     }

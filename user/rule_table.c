@@ -49,7 +49,7 @@ fix_endianness(rule_table_t *rule_table);
 
 /*   F U N C T I O N S   I M P L E M E N T A T I O N S   */
 result_t
-RULE_TABLE_bin_to_human(const char *path, rule_table_t *rule_table_out)
+RULE_TABLE_bin_to_human(rule_table_t *rule_table, const char *path)
 {
     result_t result = E__UNKNOWN;
     int fd = INVALID_FD;
@@ -58,7 +58,7 @@ RULE_TABLE_bin_to_human(const char *path, rule_table_t *rule_table_out)
     ssize_t read_result = 0;
 
     /* 0. Input vaidation */
-    if ((NULL == rule_table_out)) {
+    if ((NULL == rule_table)) {
         result = E__NULL_INPUT;
         goto l_cleanup;
     }
@@ -80,7 +80,7 @@ RULE_TABLE_bin_to_human(const char *path, rule_table_t *rule_table_out)
     }
 
     /* 3. Verify size */
-    rules_count = (size_t)read_result / sizeof(rule_table_out->rules[0]);
+    rules_count = (size_t)read_result / sizeof(rule_table->rules[0]);
 
     /* 3.1. Rules overflow */
     if (rules_count > MAX_RULES) {
@@ -93,19 +93,19 @@ RULE_TABLE_bin_to_human(const char *path, rule_table_t *rule_table_out)
     }
 
     /* 3.2. Align mismatch */
-    if ((size_t)read_result != rules_count * sizeof(rule_table_out->rules[0])) {
+    if ((size_t)read_result != rules_count * sizeof(rule_table->rules[0])) {
         (void)fprintf(stderr, "ERROR: Bytes amount doesn't align to rules\n");
         result = E__BIN_RULES_ALIGN_MISMATCH;
         goto l_cleanup;
     }
 
     /* 4. Fill rule table */
-    (void)memcpy((void *)rule_table_out->rules,
+    (void)memcpy((void *)rule_table->rules,
                  (void *)rules_buffer,
                  (size_t)read_result);
 
 
-    rule_table_out->rules_count = rules_count;
+    rule_table->rules_count = rules_count;
 
 #if 0
     /* 5. Fix endianness */
@@ -345,7 +345,7 @@ l_cleanup:
 }
 
 result_t
-RULE_TABLE_human_to_bin(const char *path, rule_table_t *rule_table_out)
+RULE_TABLE_human_to_bin(rule_table_t *rule_table, const char *path)
 {
     result_t result = E__UNKNOWN;
     FILE * file = NULL;
@@ -353,7 +353,7 @@ RULE_TABLE_human_to_bin(const char *path, rule_table_t *rule_table_out)
     size_t i = 0;
 
     /* 0. Input vaidation */
-    if ((NULL == rule_table_out)) {
+    if ((NULL == rule_table)) {
         result = E__NULL_INPUT;
         goto l_cleanup;
     }
@@ -368,8 +368,8 @@ RULE_TABLE_human_to_bin(const char *path, rule_table_t *rule_table_out)
     }
 
     /* 2. Parse rules up to the rules array */
-    for (i = 0 ; i < ARRAY_LENGTH(rule_table_out->rules) ; ++i) {
-        result = parse_human_to_bin(file, &rule_table_out->rules[i], &is_eof);
+    for (i = 0 ; i < ARRAY_LENGTH(rule_table->rules) ; ++i) {
+        result = parse_human_to_bin(file, &rule_table->rules[i], &is_eof);
         if (E__SUCCESS != result) {
             goto l_cleanup;
         }
@@ -387,7 +387,7 @@ RULE_TABLE_human_to_bin(const char *path, rule_table_t *rule_table_out)
     }
 
     /* 4. Fill the rules count */
-    rule_table_out->rules_count = i;
+    rule_table->rules_count = i;
 
     result = E__SUCCESS;
 l_cleanup:
@@ -590,17 +590,36 @@ print_rule(rule_t *rule)
     );
 }
 
-
-#if 0
-    static void
-fix_endianness(rule_table_t *rule_table)
+result_t
+RULE_TABLE_write_bin(rule_table_t *rule_table, const char *path)
 {
-    size_t i = 0;
+    result_t result = E__UNKNOWN;
+    int fd = INVALID_FD;
+    ssize_t write_result = -1;
+    size_t length_to_write = 0;
 
-    for (i = 0 ; i < rule_table->rule_count ; ++i) {
-        rule_t *current_entry = &rule_table->rules[i];
-        current_entry->src_ip = inet
-
+    /* 1. Open destination file */
+    fd = open(path, O_WRONLY);
+    if (INVALID_FD == fd) {
+        perror("open error");
+        result = E__OPEN_ERROR;
+        goto l_cleanup;
     }
+
+    /* 2. Write the rules */
+    length_to_write = sizeof(rule_table->rules[0]) * rule_table->rules_count;
+    write_result = write(fd, (void *)rule_table->rules, length_to_write);
+    if (write_result < (ssize_t)length_to_write) {
+        perror("write error");
+        result = E__WRITE_ERROR;
+        goto l_cleanup;
+    }
+
+    /* Success */
+    result = E__SUCCESS;
+l_cleanup:
+
+    CLOSE_SAFE(fd);
+    return result;
 }
-#endif /* 0 */
+
