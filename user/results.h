@@ -29,6 +29,7 @@ typedef enum result_e {
     E__HUMAN_RULES_INVALID_DIRECTION,
     E__HUMAN_RULES_INVALID_PROTOCOL,
     E__WRITE_ERROR,
+    E__INCOMPLETE_LOG,
 } result_t;
 
 #endif /* __RESULTS_H__ */

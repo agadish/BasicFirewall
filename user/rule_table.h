@@ -1,5 +1,5 @@
 /**
- * @file results.h
+ * @file rule_table.h
  * @author Assaf Gadish
  *
  * @brief Rule table functions
