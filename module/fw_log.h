@@ -2,7 +2,7 @@
  * @file fw_log.h
  * @author Assaf Gadish
  *
- * @brief Rule table chaining and execution
+ * @brief Logging system of the firewall
  *        Written for course "Workshop in Information Security", TAU 2022-23.
  */
 #ifndef __FW_LOG_H__
@@ -14,9 +14,10 @@
 #include "fw.h"
 #include "common.h"
 #include "fw_log.h"
+#include "fw_results.h"
 
 /*    T Y P E D E F S   */
-typedef struct fw_log_s fw_log_t;
+typedef struct log_dump_context_s log_dump_context_t;
 
 
 /*   F U N C T I O N S   D E C L A R A T I O N S   */
@@ -28,7 +29,10 @@ typedef struct fw_log_s fw_log_t;
  * @return TRUE on success, FALSE on failure
  */
 void
-FW_LOG_init(fw_log_t *table);
+FW_LOG_init(void);
+
+void
+FW_LOG_shutdown(void);
 
 /**
  * @brief Destroy a rule table
@@ -43,29 +47,33 @@ FW_LOG_init(fw_log_t *table);
  * @remark On any failure (for example if invalid data was given), the function
  *         will reset the data, discarding the previous rules if existed.
  */
-bool_t
-FW_LOG_set_data(fw_log_t *table,
-                    const uint8_t *data,
-                    size_t data_length);
+result_t
+FW_LOG_log(const log_row_t *log);
+
 
 /**
- * @brief Match a given packet against the whole rule table, and return the
- *        required action
+ * @brief Create a dump context. Required to call before performing a log dump
  * 
- * @param[in] table Table with the rules
- * @param[in] skb The packet to check
- * @param[out] action_out The decision made by the function, valid only if the
- *             function returned TRUE. can be eiter NF_ACCEPT or NF_DROP
+ * @param[out] context_out The new log context
  *
- * @return NF_ACCEPT or NF_DROP
+ * @return E__SUCCESS on success, other value on error.
  *
- * @remark If the packet doesn't match the table then nothing will be written
- *         to action_out parameter
+ * @remark On error, NULL will be written into context_out (if it's not NULL)
  */
-bool_t
-FW_LOG_check(const fw_log_t *table,
-                 const struct sk_buff *skb,
-                 __u8 *action_out)
+result_t
+FW_LOG_init_dump_context(log_dump_context_t **context_out);
+
+result_t
+FW_LOG_dump(log_dump_context_t *context,
+            uint8_t *out_buffer,
+            size_t buffer_size,
+            size_t *bytes_written_out);
+
+void
+FW_LOG_release_dump_context(log_dump_context_t *context);
+
+void
+FW_LOG_reset_logs(void);
 
 
 #endif /* __FW_LOG_H__ */

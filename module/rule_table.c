@@ -22,8 +22,12 @@
  *        XORing the ack bit with the ack_t value does the job
  */
 #define DOES_ACK_MATCH(tcp_header, rule) (((tcp_header)->ack) ^ (rule)->ack)
-#define IN_INTERFACE "eth1"
-#define OUT_INTERFACE "eth2"
+#define IN_INTERFACE "enp0s8"
+#define OUT_INTERFACE "enp0s9"
+#define PORT_1023 (1023)
+#define LOOPBACK_FIRST_TRIPLET_MASK (127 << 24)
+#define IS_LOOPBACK_ADDRESS(a) (LOOPBACK_FIRST_TRIPLET_MASK == \
+        ((a) & LOOPBACK_FIRST_TRIPLET_MASK))
 
 
 /*   F U N C T I O N S   D E C L A R A T I O N S   */
@@ -39,15 +43,24 @@ static bool_t
 does_match_rule(const rule_t *rule, const struct sk_buff *skb);
 
 /**
- * @brief Check if an inet packet has protocol TCP underlying
+ * @brief Check if an inet packet should be ignored (aka non TCP, UDP nor ICMP)
  * 
  * @param[in] skb
  *
- * @return TRUE if TCP packet, otherwise FALSE
+ * @return TRUE if TCP/UDP/ICMP packet, otherwise FALSE
  */
 static bool_t
-is_tcp_packet(const struct sk_buff *skb);
+is_tcp_udp_icmp_packet(const struct sk_buff *skb);
 
+/**
+ * @brief Check if a packet is loopback - source+destionation is 127.0.0.1/8
+ * 
+ * @param[in] skb
+ *
+ * @return TRUE if loopback packet, otherwise FALSE
+ */
+static bool_t
+is_loopback_packet(const struct sk_buff *skb);
 
 /**
  * @brief Determine if a packet has came
@@ -143,24 +156,37 @@ RULE_TABLE_check(const rule_table_t *table,
         goto l_cleanup;
     }
 
-    // 1. Check if UDP, ICMP or any non-TCP packet
-    if (!is_tcp_packet(skb)) {
+    /* 1. Check if the packet has an handled protocol (TCP/UDP/ICMP) */
+    if (!is_tcp_udp_icmp_packet(skb)) {
+        *action_out = NF_ACCEPT;
         goto l_cleanup;
 
     }
 
-    // 2. Go over the rules list
+    /* 2. Ignore loopback packets */
+    /* NOTE: forward chain shouldn't have loopback packets, but this is a
+     *       requirement of the exercise */
+    if (!is_loopback_packet(skb)) {
+        *action_out = NF_ACCEPT;
+        goto l_cleanup;
+
+    }
+
+    /* 3. Go over the rules list */
     for (i = 0 ; i < table->rules_count ; ++i) {
         const rule_t * current_rule = &table->rules[i];
 
         if (does_match_rule(current_rule, skb)) {
-            // Found a match - break
+            /* Found a match - break */
             *action_out = current_rule->action;
 
             does_match = TRUE;
             break;
         }
     }
+    
+    /* 4. No rule has matched? drop the packet */
+    *action_out = NF_DROP;
 
 l_cleanup:
 
@@ -168,10 +194,34 @@ l_cleanup:
 }
 
 static bool_t
-is_tcp_packet(const struct sk_buff *skb)
+is_tcp_udp_icmp_packet(const struct sk_buff *skb)
 {
-    struct iphdr * ip_header = (struct iphdr *)skb_network_header(skb);
-    return (IPPROTO_TCP == ip_header->protocol) ? TRUE : FALSE;
+    bool_t result = FALSE;
+    struct iphdr *ip_header = (struct iphdr *)skb_network_header(skb);
+
+    if ((IPPROTO_TCP == ip_header->protocol) ||
+        (IPPROTO_UDP == ip_header->protocol) ||
+        (IPPROTO_ICMP == ip_header->protocol))
+    {
+        result = TRUE;
+    }
+
+    return result;
+}
+
+static bool_t
+is_loopback_packet(const struct sk_buff *skb)
+{
+    bool_t result = FALSE;
+    struct iphdr *ip_header = (struct iphdr *)skb_network_header(skb);
+
+    if (IS_LOOPBACK_ADDRESS(ip_header->saddr) && IS_LOOPBACK_ADDRESS(ip_header->daddr))
+    {
+        printk(KERN_INFO "found loopback packet\n");
+        result = TRUE;
+    }
+
+    return result;
 }
 
 static direction_t
@@ -180,7 +230,6 @@ get_packet_direction(const struct sk_buff *skb)
     direction_t direction = DIRECTION_ANY;
     char *iface_name = skb->dev->name;
     size_t name_length = ARRAY_SIZE(skb->dev->name);
-
 
     if (0 == strncmp(iface_name, IN_INTERFACE, name_length)) {
         direction = DIRECTION_IN;
@@ -197,8 +246,7 @@ static bool_t
 does_match_rule(const rule_t *rule, const struct sk_buff *skb)
 {
     bool_t does_match = FALSE;
-    struct iphdr * ip_header = (struct iphdr *)skb_network_header(skb);
-    struct tcphdr * tcp_header = NULL;
+    struct iphdr *ip_header = (struct iphdr *)skb_network_header(skb);
     direction_t direction = DIRECTION_ANY;
     
     /* 1. Match soruce ip */
@@ -238,29 +286,53 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
     /*     break; */
     /* } */
 
-    /* 4. Match flags */
-    tcp_header = (struct tcphdr *)skb_transport_header(skb);
-    if (!DOES_ACK_MATCH(tcp_header, rule)) {
-        goto l_cleanup;
-    }
+    /* 4. TCP specific */
+    if (IPPROTO_TCP == ip_header->protocol) {
+        struct tcphdr *tcp_header = (struct tcphdr *)skb_transport_header(skb);
+        /* 4.1. Match src port */
+        if ((0 != rule->src_port) &&
+            (rule->src_port != tcp_header->source) &&
+            ((PORT_1023 == rule->src_port) && tcp_header->source <= PORT_1023))
+        {
 
-    /* 5. Match src port */
-    if ((0 != rule->src_port) &&
-        (rule->src_port != tcp_header->source) &&
-        ((1023 == rule->src_port) && tcp_header->source <= 1023))
-    {
+            goto l_cleanup;
+        }
 
-        goto l_cleanup;
-    }
+        /* 4.2. Match dst port */
+        if ((0 != rule->dst_port) &&
+            (rule->dst_port != tcp_header->dest) &&
+            ((PORT_1023 == rule->dst_port) && tcp_header->dest <= PORT_1023))
+        {
 
-    /* 6. Match dst port */
-    if ((0 != rule->dst_port) &&
-        (rule->dst_port != tcp_header->dest) &&
-        ((1023 == rule->dst_port) && tcp_header->dest <= 1023))
-    {
+            goto l_cleanup;
+        }
 
-        goto l_cleanup;
-    }
+        /* 4.3. TCP: match flags */
+        if (!DOES_ACK_MATCH(tcp_header, rule)) {
+            goto l_cleanup;
+        }
+    /* 5. UDP specific */
+    } else if (IPPROTO_UDP == ip_header->protocol) {
+        struct udphdr *udp_header = (struct udphdr *)skb_transport_header(skb);
+        /* 4.1. Match src port */
+        if ((0 != rule->src_port) &&
+            (rule->src_port != udp_header->source) &&
+            ((PORT_1023 == rule->src_port) && udp_header->source <= PORT_1023))
+        {
+
+            goto l_cleanup;
+        }
+
+        /* 4.2. Match dst port */
+        if ((0 != rule->dst_port) &&
+            (rule->dst_port != udp_header->dest) &&
+            ((PORT_1023 == rule->dst_port) && udp_header->dest <= PORT_1023))
+        {
+
+            goto l_cleanup;
+        }
+    } /* Note: Nothing ICMP specific */
+
 
     /* Note: this seems like the most complex test, and I assume most of the
      *       packets will fall on previous tests - so I left it to be last */

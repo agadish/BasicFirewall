@@ -16,6 +16,13 @@
 #define FALSE (0)
 #define TRUE (!FALSE)
 
+#define KFREE_SAFE(p) do {  \
+    if (NULL != (p)) {      \
+        kfree((p));         \
+        (p) = NULL;         \
+    }                       \
+} while (0)
+
 
 /*   T Y P E D E F S    */
 typedef uint8_t bool_t;

@@ -14,6 +14,7 @@
 
 #include "common.h"
 #include "rule_table.h"
+#include "fw_log.h"
 
 
 /*   K E R N E L   A T T R I B U T E S   */
@@ -373,13 +374,16 @@ __init hw3secws_init(void)
     /* 1. Init globals */
     RULE_TABLE_init(&g_rule_table);
 
-    /* 2. Register hooks */
+    /* 2. Init logs module */
+    FW_LOG_init();
+
+    /* 3. Register hooks */
     result = register_hooks();
     if (0 != result) {
         goto l_cleanup;
     }
 
-    /* 3. Init char device and sysfs device */
+    /* 4. Init char device and sysfs device */
     result = init_drivers();
     if (0 != result) {
         goto l_cleanup;
@@ -403,6 +407,9 @@ hw3secws_exit(void)
 
     /* 2. Release all the hooks */
     unregister_hooks();
+    
+    /* 3. Shutdown logs module */
+    FW_LOG_shutdown();
 }
 
 
