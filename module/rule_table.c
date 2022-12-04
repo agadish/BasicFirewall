@@ -23,14 +23,12 @@
  *        XORing the ack bit with the ack_t value does the job
  */
 #define DOES_ACK_MATCH(tcp_header, rule) (((tcp_header)->ack) ^ (rule)->ack)
+
 #define IN_INTERFACE "enp0s8"
 #define OUT_INTERFACE "enp0s9"
 #define LO_INTERFACE "lo"
 #define PORT_1023 (1023)
 #define PORT_1023_N (ntohs(PORT_1023))
-#define LOOPBACK_FIRST_TRIPLET_MASK (127 << 24)
-#define IS_LOOPBACK_ADDRESS(a) (LOOPBACK_FIRST_TRIPLET_MASK == \
-        ((a) & LOOPBACK_FIRST_TRIPLET_MASK))
 
 #define IS_XMAS_TCP_HEADER(tcp_hdr) ((0 != (tcp_hdr)->fin) && \
                                      (0 != (tcp_hdr)->urg) && \
@@ -81,13 +79,30 @@ is_loopback_packet(const struct sk_buff *skb);
 static direction_t
 get_packet_direction(const struct sk_buff *skb);
 
-
+/**
+ * @brief Check if a rules array is valid
+ * 
+ * @param[in] rules The rules array
+ * @param[in] rules_count Number of members in the array
+ *
+ * @return TRUE if valid, otherwise FALSE
+ *
+ * @see is_rule_valid
+ */
 static bool_t
 are_rules_valid(const rule_t *rules, size_t rules_count);
 
+/**
+ * @brief Check if a rule is valid. For exact definition of valid, see source
+ * 
+ * @param[in] rule The rule to check
+ *
+ * @return TRUE if valid, otherwise FALSE
+ *
+ * @see is_rule_valid
+ */
 static bool_t
 is_rule_valid(const rule_t *rule);
-
 
 
 /*   F U N C T I O N S   I M P L E M E N T A T I O N S   */
@@ -98,7 +113,6 @@ RULE_TABLE_init(rule_table_t *table)
         (void)memset(table, 0, sizeof(table));
     }
 }
-
 
 static bool_t
 is_rule_valid(const rule_t *r)
@@ -239,7 +253,6 @@ RULE_TABLE_dump_data(const rule_table_t *table,
 {
     bool_t result = FALSE;
     size_t required_length = 0;
-    /* size_t i = 0; */
 
     if ((NULL == table) || (NULL == buffer) || (NULL == buffer_size_inout)) {
         goto l_cleanup;
@@ -252,11 +265,6 @@ RULE_TABLE_dump_data(const rule_table_t *table,
 
     (void)memcpy(buffer, &table->rules, required_length);
     *buffer_size_inout = required_length;
-    /* printk(KERN_INFO "dump_data len %d, %d rules_count, sizeof(rule_table)=%lu\n", required_length ,table->rules_count, (unsigned long)sizeof(table)); */
-    /* for (i = 0 ; i < table->rules_count ; ++i) { */
-    /*     const rule_t *r = &table->rules[i]; */
-        /* printk(KERN_INFO "rule %s: srcip %.8x/%d dstip %.8x/%d\n", r->rule_name, r->src_ip, r->src_prefix_size, r->dst_ip, r->dst_prefix_size); */
-    /* } */
 
     result = TRUE;
 l_cleanup:
@@ -265,14 +273,14 @@ l_cleanup:
 }
 
 bool_t
-RULE_TABLE_is_whitelist(const rule_table_t *table,
+RULE_TABLE_is_freepass(const rule_table_t *table,
                         const struct sk_buff *skb)
 {
-    bool_t is_whitelist = FALSE;
+    bool_t is_freepass = FALSE;
 
     /* 0. Input validation */
     if ((NULL == table) || (NULL == skb)) {
-        printk(KERN_WARNING "RULE_TABLE_is_whitelist got invalid input\n");
+        printk(KERN_WARNING "%s: invalid input\n", __func__);
         goto l_cleanup;
     }
 
@@ -281,12 +289,12 @@ RULE_TABLE_is_whitelist(const rule_table_t *table,
     if ((!is_tcp_udp_icmp_packet(skb)) ||
         is_loopback_packet(skb))
     {
-        is_whitelist = TRUE;
+        is_freepass = TRUE;
     }
 
 l_cleanup:
 
-    return is_whitelist;
+    return is_freepass;
 }
 
 bool_t
@@ -322,7 +330,7 @@ RULE_TABLE_check(const rule_table_t *table,
                  reason_t *reason_out)
 {
     bool_t does_match = FALSE;
-    size_t i = 0 ;
+    size_t i = 0;
 
     /* 0. Input validation */
     if ((NULL == table) || (NULL == skb) || (NULL == action_out) || (NULL == reason_out)) {
@@ -475,7 +483,6 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
             goto l_cleanup;
         }
     } /* Note: Nothing ICMP specific */
-
 
     /* 7. Match direction */
     direction = get_packet_direction(skb);

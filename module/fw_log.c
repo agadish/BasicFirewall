@@ -19,8 +19,7 @@
 
 
 /*    M A C R O S   */
-#define ROWS_PER_CHUNK (256)
-#define CHUNK_AVAILABLE_SIZE (
+#define ROWS_PER_CHUNK (2048)
 
 /*    T Y P E D E F S   */
 struct log_dump_context_s {
@@ -121,7 +120,6 @@ allocate_new_chunk_if_required(void)
     if ((NULL == g_log_tail) ||
         ((ROWS_PER_CHUNK - 1) <= g_log_tail->write_index))
     {
-        printk(KERN_INFO "allocating new chunk for node...");
         result = add_tail();
         if (E__SUCCESS != result) {
             goto l_cleanup;
@@ -192,7 +190,6 @@ init_log_row(log_row_t *row, const struct sk_buff *skb)
         break;
     case IPPROTO_ICMP:
     default:
-        printk(KERN_INFO "UNKNOWN PROTOOO PORTS ARE ZERO\n");
         row->src_port = 0;
         row->dst_port = 0;
         break;
@@ -204,7 +201,6 @@ touch_log_row(log_row_t *row, __u8 action, reason_t reason)
 {
     struct timespec timespec = {0};
 
-    /* printk(KERN_INFO "touching the log!..."); */
     getnstimeofday(&timespec);
     row->timestamp = timespec.tv_sec;
     row->reason = reason;
@@ -225,11 +221,6 @@ does_log_row_match(const log_row_t *row,
         (row->dst_ip != ip_header->daddr) ||
         (row->protocol != protocol))
     {
-        /* printk(KERN_INFO "%s: fell for IP/protocol: req %.8x->%.8x %d, got %.8x->%.8x %d\n", __func__, */
-        /*  */
-        /*         row->src_ip, row->dst_ip, row->protocol, */
-        /*         ip_header->saddr, ip_header->daddr, protocol */
-        /*         ); */
         goto l_cleanup;
     }
 
@@ -241,7 +232,6 @@ does_log_row_match(const log_row_t *row,
         if ((row->src_port != tcp_header->source) ||
             (row->dst_port != tcp_header->dest))
         {
-            printk(KERN_INFO "%s: fell for tcp port: src%x/%x dst%x/%x\n", __func__, row->src_port, tcp_header->source, row->dst_port, tcp_header->dest);
             goto l_cleanup;
         }
     /* 2.2. UDP */
@@ -250,7 +240,6 @@ does_log_row_match(const log_row_t *row,
         if ((row->src_port != udp_header->source) ||
             (row->dst_port != udp_header->dest))
         {
-            printk(KERN_INFO "%s: fell for udp port\n", __func__);
             goto l_cleanup;
         }
     /* 2.3. ICMP */
@@ -258,7 +247,6 @@ does_log_row_match(const log_row_t *row,
         /* Nothing to check */
     /* 2.4. Unkwnown protocol */
     } else {
-        printk(KERN_INFO "%s: fell for unknown protocol\n", __func__);
         goto l_cleanup;
     }
 
@@ -275,29 +263,9 @@ search_log_entry(const struct sk_buff *skb)
     struct klist_iter list_iter = {0};
     logs_chunk_t *current_entry = NULL;
     uint8_t i = 0;
-    /* struct iphdr *ip_header = (struct iphdr *)skb_network_header(skb); */
-    /* struct tcphdr *tcp_header = (struct tcphdr *)skb_transport_header(skb); */
 
     klist_iter_init(&g_log, &list_iter);
 
-    /* if (IPPROTO_TCP == ip_header->protocol || IPPROTO_UDP == ip_header->protocol) { */
-    /* printk(KERN_INFO "%s\tenter for src0x%.8x:%lu dst0x%.8x:%lu prot %d entry %d\n", */
-    /*        __func__, */
-    /*        ip_header->saddr, */
-    /*        (unsigned long)tcp_header->source, */
-    /*        ip_header->daddr, */
-    /*        (unsigned long)tcp_header->dest, */
-    /*        ip_header->protocol, */
-    /*        rule_index */
-    /*        ); */
-    /* } else if (IPPROTO_ICMP == ip_header->protocol) { */
-    /*     printk(KERN_INFO "%s\tenter for src0x%.8x dst0x%.8x prot ICMP entry %d\n", */
-    /*             __func__, */
-    /*             ip_header->saddr, */
-    /*             ip_header->daddr, */
-    /*             rule_index */
-    /*           ); */
-    /* } */
     while (TRUE) {
         /* 1. Get next chunk  */
         current_entry = (logs_chunk_t *)klist_next(&list_iter); 
@@ -359,45 +327,6 @@ l_cleanup:
 
     return result;
 }
-
-#if 0
-result_t
-FW_LOG_init_dump_context(log_dump_context_t **context_out)
-{
-    result_t result = E__UNKNOWN;
-    log_dump_context_t *ctx = NULL;
-
-    /* 0. Input validation */
-    if (NULL == context_out) {
-        result = E__NULL_INPUT;
-        goto l_cleanup;
-    }
-
-    /* 1. Allocate context */
-    ctx = (log_dump_context_t *)kmalloc(sizeof(*ctx), GFP_KERNEL);
-    if (NULL == ctx) {
-        result = E__KMALLOC_ERROR;
-        goto l_cleanup;
-    }
-
-    /* 2. Init context */
-    (void)memset(ctx, 0, sizeof(*ctx));
-
-    /* Success */
-    *context_out = ctx;
-    result = E__SUCCESS;
-l_cleanup:
-
-    if (E__SUCCESS != result) {
-        KFREE_SAFE(ctx);
-        if (NULL != context_out) {
-            *context_out = NULL;
-        }
-    }
-
-    return result;
-}
-#endif
 
 static size_t
 dump_from_chunk(logs_chunk_t *chunk,
@@ -477,15 +406,6 @@ l_cleanup:
     return total_written;
 }
 
-#if 0
-void
-FW_LOG_release_dump_context(log_dump_context_t *context)
-{
-    KFREE_SAFE(context);
-}
-#endif
-
-
 void
 FW_LOG_shutdown(void)
 {
@@ -502,10 +422,8 @@ FW_LOG_reset_logs(void)
     klist_iter_init(&g_log, &i);
     current_entry = (logs_chunk_t *)klist_next(&i); 
 
-    /* printk("%s: iter_init, current_entry=%p\n", __func__, current_entry); */
     while (NULL != current_entry) {
         next_entry = (logs_chunk_t *)klist_next(&i);
-        /* printk(KERN_INFO "clearing entry that had %d logs\n", current_entry->write_index); */
         klist_del(&current_entry->node);
         KFREE_SAFE(current_entry);
         current_entry = next_entry;

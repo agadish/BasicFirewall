@@ -76,48 +76,139 @@ hw3secws_hookfn_forward(
     const struct nf_hook_state *state
 );
 
+/**
+ * @brief Initialise the class and both drivers (log, rules)
+ * 
+ * @return 0 on success, non-zero on error
+ */
 static int
 init_drivers(void);
 
+/**
+ * @brief Initialise the log driver
+ * 
+ * @return 0 on success, non-zero on error
+ */
 static int
 init_log_driver(void);
 
+/**
+ * @brief Initialise the rules driver
+ * 
+ * @return 0 on success, non-zero on error
+ */
 static int
 init_rules_driver(void);
 
+/**
+ * @brief Cleans the class and both drivers (log, rules)
+ */
 static void
 clean_drivers(void);
 
+/**
+ * @brief Cleans the log driver
+ */
 static void
 clean_log_driver(void);
 
+/**
+ * @brief Cleans the rules driver
+ */
 static void
 clean_rules_driver(void);
 
+/**
+ * @brief Register the firewall's hooks, aka the FORWARD hook
+ *
+ * @return 0 on success, non-zero on error
+ */
 static int
 register_hooks(void);
 
+/**
+ * @brief Cleanup the hooks, must be called at module shutdown in order to
+ *        clean register_hooks operation
+ */
 static void
 unregister_hooks(void);
 
+/**
+ * @brief Handle a read request from the sysfs rules driver
+ *
+ * @param[in] dev Ignored
+ * @param[in] attr Ignored
+ * @param[in] buf The buffer that will be copied to the user later. It's length
+ *                is PAGE_SIZE
+ *
+ * @return Number of bytes were written, or negative value on error
+ */
 static ssize_t
 rules_display(struct device *dev, struct device_attribute *attr, char *buf);
 
+/**
+ * @brief Handles a write request that modifies the rules
+ *
+ * @param[in] dev Ignored
+ * @param[in] attr Ignored
+ * @param[in] buf The buffer that holds the new rules
+ * @param[in] count Length of buf
+ *
+ * @return Number of bytes were read, or negative value on error
+ */
 static ssize_t
 rules_modify(struct device *dev, struct device_attribute *attr, const char *buf, size_t count);
 
+/**
+ * @brief Handles a write that requests to zero the logs file
+ *
+ * @param[in] dev Ignored
+ * @param[in] attr Ignored
+ * @param[in] buf The buffer that holds the message
+ * @param[in] count Length of buf
+ *
+ * @return Number of bytes were read, or negative value on error
+ */
 static ssize_t
 log_modify(struct device *dev, struct device_attribute *attr, const char *buf, size_t count);
 
+/**
+ * @brief Read logs from the firewall's logs module to the userspace.
+ *        The logs are read as an array of log_row_t, with maximum size possible
+ *
+ * @param[in] fw_log_file Ignored
+ * @param[out] user_buffer The user buffer which the logs will be copied to
+ * @param[in] requested_length The length of user_buffer
+ * @param[inout] offset The offset within the logs buffer. Will hold the new
+ *                      offset later.
+ *
+ * @return Number of bytes were read, or negative value on error
+ */
 static ssize_t
 fw_log_read(struct file *fw_log_file,
             char __user *user_buffer,
             size_t requested_length,
             loff_t *offset);
 
+/**
+ * @brief Called when the logs device is opened. Does nothing.
+ *
+ * @param[in] fw_log_inode Ignored
+ * @param[in] fw_log_file Ignored
+ *
+ * @return 0 on success, non-zero on error
+ */
 static int
 fw_log_open(struct inode *fw_log_inode, struct file *fw_log_file);
 
+/**
+ * @brief Called when the logs device is closed. Does nothing.
+ *
+ * @param[in] fw_log_inode Ignored
+ * @param[in] fw_log_file Ignored
+ *
+ * @return 0 on success, non-zero on error
+ */
 static int
 fw_log_release(struct inode *fw_log_inode, struct file *fw_log_file);
 
@@ -154,23 +245,16 @@ static struct cdev g_cdev_logs;
 
 static rule_table_t g_rule_table;
 
+/**
+ * @brief The sysfs files
+ */
+/* rules write/read file */
 static DEVICE_ATTR(rules, S_IWUSR | S_IRUGO, rules_display, rules_modify); 
+/* logs reset file */
 static DEVICE_ATTR(reset, S_IWUSR, NULL, log_modify); 
 
 
 /*   F U N C T I O N S    I M P L E M E N T A T I O N S   */
-/* static void */
-/* log_accept(void) */
-/* { */
-/*     printk(KERN_INFO "*** Packet Accepted ***\n"); */
-/* } */
-
-/* static void */
-/* log_drop(void) */
-/* { */
-/*     printk(KERN_INFO "*** Packet Dropped ***\n"); */
-/* } */
-
 static ssize_t
 fw_log_read(struct file *fw_log_file,
             char __user *user_buffer,
@@ -196,14 +280,12 @@ fw_log_release(struct inode *fw_log_inode, struct file *fw_log_file)
     return 0;
 }
 
-
 static unsigned int
 hw3secws_hookfn_forward(
     void *priv,
     struct sk_buff *skb,
     const struct nf_hook_state *state
 ){
-
     __u8 action = NF_DROP;
     bool_t has_match = FALSE;
     reason_t reason = REASON_FW_INACTIVE;
@@ -213,19 +295,10 @@ hw3secws_hookfn_forward(
 
     /* 1. Check if xmas packet */
     if (RULE_TABLE_is_xmas_packet(skb)) {
-        /* struct iphdr *ip_header = (struct iphdr *)skb_network_header(skb); */
-        /* struct tcphdr *tcp_header = NULL; */
-        /* if (IPPROTO_TCP == ip_header->protocol || IPPROTO_UDP ==ip_header->protocol) { */
-        /*     tcp_header = (struct tcphdr *)skb_transport_header(skb); */
-        /*     printk(KERN_INFO "XMAS PACKET src:%.8x dst:%.8x\n", tcp_header->source, tcp_header->dest); */
-        /* } else { */
-        /*     printk(KERN_INFO "XMAS PACKET IP_PROTO=%d\n", ip_header->protocol); */
-        /* } */
-        /* printk(KERN_INFO "XMASSSSSSSSSSSSS\n"); */
         action = NF_DROP;
         reason = REASON_XMAS_PACKET;
-    } else if (RULE_TABLE_is_whitelist(&g_rule_table, skb)) {
-        /* 2. Accept whitelist packets without logging them:
+    } else if (RULE_TABLE_is_freepass(&g_rule_table, skb)) {
+        /* 2. Accept freepass list packets without logging them:
          *    loopbacks packets, or non-TCP/UDP/ICMP packets */
         action = NF_ACCEPT;
         goto l_cleanup;
@@ -243,6 +316,7 @@ hw3secws_hookfn_forward(
     }
 
     /* 3. Log the packet with the action to the reason */
+    /* Note: we have nothing to do with logging failure */
     (void)FW_LOG_log_match(skb, action, reason);
 
 l_cleanup:
@@ -330,9 +404,6 @@ init_log_driver(void)
         result = -1;
         goto l_cleanup;
     }
-
-    /* 4. Create /dev/fw_log */
-    /* cdev_init(&my_cdev,  */
 
     result = 0;
 l_cleanup:

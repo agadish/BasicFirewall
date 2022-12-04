@@ -2,7 +2,7 @@
  * @file common.h
  * @author Assaf Gadish
  *
- * @brief Common macros
+ * @brief Common macros and typedefs
  */
 #ifndef __COMMON_H__
 #define __COMMON_H__

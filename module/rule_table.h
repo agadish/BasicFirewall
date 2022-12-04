@@ -13,7 +13,6 @@
 
 #include "fw.h"
 #include "common.h"
-// #include "fw_log.h"
 
 
 /*   F U N C T I O N S   D E C L A R A T I O N S   */
@@ -48,7 +47,7 @@ RULE_TABLE_set_data(rule_table_t *table,
 /**
  * @brief Dump the table to a given buffer
  * 
- * @param[in] Table to set the data to 
+ * @param[in] table Table to set the data to 
  * @param[out] buffer The dumped table buffer
  * @param[inout] buffer_size_inout Contains the initial length of buffer param,
  *               will hold the number of bytes that actually were written
@@ -62,17 +61,17 @@ RULE_TABLE_dump_data(const rule_table_t *table,
 
 
 /**
- * @brief Check if a packet is on the whitelist.
- *        The whitelist includes non-TCP/UDP/ICMP packets, and loopback packets
+ * @brief Check if a packet is on the freepass list.
+ *        The freepass includes non-TCP/UDP/ICMP packets, and loopback packets
  * 
  * @param[in] table Table with the rules
  * @param[in] skb The packet to check
  *
- * @return TRUE if packet is in the whitelist, otherwise FALSE
+ * @return TRUE if packet is in the freepass, otherwise FALSE
  */
 bool_t
-RULE_TABLE_is_whitelist(const rule_table_t *table,
-                        const struct sk_buff *skb);
+RULE_TABLE_is_freepass(const rule_table_t *table,
+                       const struct sk_buff *skb);
 
 /**
  * @brief Match a given packet against the whole rule table, and return the
