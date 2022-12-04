@@ -203,7 +203,7 @@ RULE_TABLE_check(const rule_table_t *table,
         if (does_match_rule(current_rule, skb)) {
             /* 3. Found a match */
             does_match = TRUE;
-            printk(KERN_DEBUG "FOUND MATCHING RULE \"%s\": action %d\n", current_rule->rule_name, current_rule->action);
+            /* printk(KERN_DEBUG "FOUND MATCHING RULE \"%s\": action %d\n", current_rule->rule_name, current_rule->action); */
 
             /* 3.1. Log the match */
             (void)FW_LOG_log_match(current_rule, i, skb);

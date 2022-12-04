@@ -56,23 +56,18 @@ add_tail(void);
 /**
  * @brief Copy log_row_t's (as much as possible) from a given chunk to a buffer
  * 
- * @param[in] ctx The log dump context. Holds the current chunk's index, for
- *                fragmented read
  * @param[in] chunk The chunk to dump
- * @param[out] out_buffer The buffer to write to
+ * @param[out] out_buffer The buffer to write to (userspace)
  * @param[in] buffer_size Size of out_buffer
+ * @param[in] offset_in_chunk Offset within the chunk
  *
  * @return Number of bytes that were copied (multiple of sizeof(log_row_t)
- *
- * @remark The function updates the given ctx. If the whole chunk was copied, it
- *         will be set as 0. Otherwise, will be increased with the number of
- *         chunks that were copied
  */
 static size_t
-dump_from_chunk(log_dump_context_t *ctx,
-                logs_chunk_t *chunk,
-                uint8_t *out_buffer,
-                size_t buffer_size);
+dump_from_chunk(logs_chunk_t *chunk,
+                uint8_t __user *out_buffer,
+                size_t buffer_size,
+                loff_t offset_in_chunk);
 
 static void
 init_log_row(const rule_t *rule,
@@ -216,7 +211,7 @@ touch_log_row(log_row_t *row, uint8_t rule_index)
 {
     struct timespec timespec = {0};
 
-    printk(KERN_INFO "touching the log!...");
+    /* printk(KERN_INFO "touching the log!..."); */
     getnstimeofday(&timespec);
     row->timestamp = timespec.tv_sec;
     ++(row->count);
@@ -237,10 +232,10 @@ does_log_row_match(const log_row_t *row,
         (row->dst_ip != ip_header->daddr) ||
         (row->protocol != protocol))
     {
-        printk(KERN_INFO "%s: fell for IP/protocol: req %.8x->%.8x %d, got %.8x->%.8x %d\n", __func__,
-                row->src_ip, row->dst_ip, row->protocol,
-                ip_header->saddr, ip_header->daddr, protocol
-                );
+        /* printk(KERN_INFO "%s: fell for IP/protocol: req %.8x->%.8x %d, got %.8x->%.8x %d\n", __func__, */
+        /*         row->src_ip, row->dst_ip, row->protocol, */
+        /*         ip_header->saddr, ip_header->daddr, protocol */
+        /*         ); */
         goto l_cleanup;
     }
 
@@ -373,6 +368,7 @@ l_cleanup:
     return result;
 }
 
+#if 0
 result_t
 FW_LOG_init_dump_context(log_dump_context_t **context_out)
 {
@@ -409,57 +405,49 @@ l_cleanup:
 
     return result;
 }
+#endif
 
 static size_t
-dump_from_chunk(log_dump_context_t *ctx,
-                logs_chunk_t *chunk,
-                uint8_t *out_buffer,
-                size_t buffer_size)
+dump_from_chunk(logs_chunk_t *chunk,
+                uint8_t __user *out_buffer,
+                size_t buffer_size,
+                loff_t offset_in_chunk)
 {
     /* 1. Calculate size to copy */
-    size_t available_chunks_src = chunk->write_index - ctx->read_index;
+    size_t available_chunks_src = chunk->write_index - offset_in_chunk;
     size_t available_chunks_dst = buffer_size / sizeof(log_row_t);
     size_t size_to_copy = sizeof(log_row_t) * min(available_chunks_src,
                                                   available_chunks_dst);
 
     /* 2. Perform the copy */
-    (void)memcpy(out_buffer, &chunk->rows[ctx->read_index], size_to_copy);
-
-    /* 3. Update the read index */
-    /* 3.1. Hadn't enough space? increase read index */
-    if (available_chunks_dst < available_chunks_src) {
-        ctx->read_index += available_chunks_dst;
-    /* 3.2. Everything was written - zero read index */
-    } else {
-        ctx->read_index = 0;
-    }
+    (void)copy_to_user(out_buffer, &chunk->rows[offset_in_chunk], size_to_copy);
 
     return size_to_copy;
 }
 
-result_t
-FW_LOG_dump(log_dump_context_t *context,
-            uint8_t *out_buffer,
+size_t
+FW_LOG_dump(uint8_t __user *out_buffer,
             size_t buffer_size,
-            size_t *bytes_written_out)
+            loff_t *offset_inout)
 {
-    result_t result = E__UNKNOWN;
     struct klist_iter i = {0};
     logs_chunk_t *current_entry = NULL;
     size_t total_written = 0;
     size_t current_written = 0;
     size_t remaining_size = buffer_size;
+    loff_t current_offset = 0;
 
     /* 0. Input validation */
-    if ((NULL == context) ||
-        (NULL == out_buffer) ||
-        (NULL == bytes_written_out))
+    if ((NULL == out_buffer) ||
+        (NULL == offset_inout))
     {
-        result = E__NULL_INPUT;
         goto l_cleanup;
     }
 
     /* 1. Iterate over the logs chunks */
+    /* 1.1. Initialise offset */
+    current_offset = *offset_inout;
+
     klist_iter_init(&g_log, &i);
     while (remaining_size > 0) {
         /* 2. Get next chunk  */
@@ -470,12 +458,15 @@ FW_LOG_dump(log_dump_context_t *context,
         }
 
         /* 3. Copy as much available complete entires */
-        current_written = dump_from_chunk(context,
-                                          current_entry,
+        /* 3.1. Copy */
+        current_written = dump_from_chunk(current_entry,
                                           &out_buffer[total_written],
-                                          remaining_size);
+                                          remaining_size,
+                                          current_offset);
+        /* 3.2. Update total, remaining and offset */
         total_written += current_written;
         remaining_size -= current_written;
+        current_offset -= current_written;
         
         /* 4. Can't fit even a single log_row_t? break */
         if (remaining_size < sizeof(log_row_t)) {
@@ -485,20 +476,22 @@ FW_LOG_dump(log_dump_context_t *context,
 
     /* 5. Finish iteration */
     klist_iter_exit(&i);
-    *bytes_written_out = total_written;
 
+    /* 6. Update offset */
+    *offset_inout += (loff_t)total_written;
 
-    result = E__SUCCESS;
 l_cleanup:
 
-    return result;
+    return total_written;
 }
 
+#if 0
 void
 FW_LOG_release_dump_context(log_dump_context_t *context)
 {
     KFREE_SAFE(context);
 }
+#endif
 
 
 void
@@ -519,6 +512,7 @@ FW_LOG_reset_logs(void)
 
     while (NULL != current_entry) {
         next_entry = (logs_chunk_t *)klist_next(&i);
+        printk(KERN_INFO "clearing entry that had %d logs\n", next_entry->write_index);
         klist_del(&current_entry->node);
         KFREE_SAFE(current_entry);
         current_entry = next_entry;

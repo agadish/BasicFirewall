@@ -95,8 +95,17 @@ rules_modify(struct device *dev, struct device_attribute *attr, const char *buf,
 static ssize_t
 log_modify(struct device *dev, struct device_attribute *attr, const char *buf, size_t count);
 
-static inline void
-zero_counters(void);
+static ssize_t
+fw_log_read(struct file *fw_log_file,
+            char __user *user_buffer,
+            size_t requested_length,
+            loff_t *offset);
+
+static int
+fw_log_open(struct inode *fw_log_inode, struct file *fw_log_file);
+
+static int
+fw_log_release(struct inode *fw_log_inode, struct file *fw_log_file);
 
 
 /*   G L O B A L S   */
@@ -110,15 +119,18 @@ static struct nf_hook_ops g_forward_hook;
  * @brief Character device of the module
  */
 static struct file_operations g_fw_log_fops = {
-    .owner = THIS_MODULE
+    .owner = THIS_MODULE,
+    .open = fw_log_open,
+    .release = fw_log_release,
+    .read = fw_log_read,
 };
 
 static int g_major_number = INVALID_MAJOR_NUMBER;
 static struct class *g_hw3secws_class = NULL;
-static struct device *g_sysfs_rules_device = NULL;
+static struct device *g_sysfs_device = NULL;
 static bool_t g_has_sysfs_rules_device = FALSE;
-static struct device *g_sysfs_log_reset_device = NULL;
-static bool_t g_has_sysfs_log_reset_device = FALSE;
+/* static struct device *g_sysfs_log_reset_device = NULL; */
+/* static bool_t g_has_sysfs_log_reset_device = FALSE; */
 static rule_table_t g_rule_table;
 
 static DEVICE_ATTR(rules, S_IWUSR | S_IRUGO, rules_display, rules_modify); 
@@ -137,6 +149,32 @@ static DEVICE_ATTR(log_reset, S_IWUSR, NULL, log_modify);
 /* { */
 /*     printk(KERN_INFO "*** Packet Dropped ***\n"); */
 /* } */
+
+static ssize_t
+fw_log_read(struct file *fw_log_file,
+            char __user *user_buffer,
+            size_t requested_length,
+            loff_t *offset)
+{
+    ssize_t read_length = -1;
+
+    read_length = FW_LOG_dump(user_buffer, requested_length, offset);
+
+    return read_length;
+}
+
+static int
+fw_log_open(struct inode *fw_log_inode, struct file *fw_log_file)
+{
+    return 0;
+}
+
+static int
+fw_log_release(struct inode *fw_log_inode, struct file *fw_log_file)
+{
+    return 0;
+}
+
 
 static unsigned int
 hw3secws_hookfn_forward(
@@ -169,35 +207,25 @@ l_cleanup:
     return (unsigned int)result;
 }
 
-static inline void
-zero_counters(void)
-{
-}
-
 static int
 register_hooks(void)
 {
     int result = 0;
     int result_register_hook = -1;
 
-    /* 1. Zero counters */
-    zero_counters();
-
     /* 1. Register Forward hook */
-
-    /* 4.1. Init struct fields */
+    /* 1.1. Init struct fields */
     g_forward_hook.hook = hw3secws_hookfn_forward;
     g_forward_hook.hooknum = NF_INET_FORWARD;
     g_forward_hook.pf = PF_INET;
     g_forward_hook.priority = NF_IP_PRI_FIRST;
 
-    /* 4.2. Register hook */
+    /* 1.2. Register hook */
     result_register_hook = nf_register_net_hook(&init_net, &g_forward_hook);
     if (0 != result_register_hook) {
         result = result_register_hook;
         goto l_cleanup;
     }
-
 
     /* Success */
     result = 0;
@@ -218,6 +246,7 @@ init_drivers(void)
     /* 1. Create character device */
     g_major_number = register_chrdev(0, CHAR_DEVICE_NAME, &g_fw_log_fops);
     if (0 > g_major_number) {
+        printk(KERN_ERR "register_chrdev failed for %s\n", CHAR_DEVICE_NAME);
         result = -1;
         goto l_cleanup;
     }
@@ -231,7 +260,7 @@ init_drivers(void)
         
     /* 3. Create sysfs rules device */
     /* 3.1. Create device */
-    g_sysfs_rules_device = device_create(g_hw3secws_class, NULL, MKDEV(g_major_number, 0), NULL, SYSFS_RULES_DEVICE_NAME);
+    g_sysfs_device = device_create(g_hw3secws_class, NULL, MKDEV(g_major_number, 0), NULL, SYSFS_RULES_DEVICE_NAME);
     if (IS_ERR(g_hw3secws_class)) {
         result = -1;
         goto l_cleanup;
@@ -240,7 +269,7 @@ init_drivers(void)
 
     /* 3.2. Create file attributes */
     result_device_create_file = device_create_file(
-        g_sysfs_rules_device,
+        g_sysfs_device,
         (const struct device_attribute *)&dev_attr_rules.attr
     );
     if (0 != result_device_create_file) {
@@ -258,15 +287,15 @@ init_drivers(void)
     /* g_has_sysfs_log_reset_device = TRUE; */
 
     /* 4.2. Create file attributes */
-    /* result_device_create_file = device_create_file( */
-    /*     g_sysfs_log_reset_device, */
-    /*     (const struct device_attribute *)&dev_attr_log_reset.attr */
-    /* ); */
-    /* if (0 != result_device_create_file) { */
-    /*     result = -1; */
-    /*     goto l_cleanup; */
-    /* } */
-    /*  */
+    result_device_create_file = device_create_file(
+        g_sysfs_device,
+        (const struct device_attribute *)&dev_attr_log_reset.attr
+    );
+    if (0 != result_device_create_file) {
+        result = -1;
+        goto l_cleanup;
+    }
+
         
     /* Success */
     result = 0;
@@ -281,20 +310,18 @@ l_cleanup:
 static void
 clean_drivers(void)
 {
-    if (NULL != g_sysfs_log_reset_device) {
+    /* if (NULL != g_sysfs_log_reset_device) { */
+    /*  */
+    /*     device_remove_file(g_sysfs_log_reset_device, (const struct device_attribute *)&dev_attr_log_reset.attr); */
+    /*     g_sysfs_log_reset_device = NULL; */
+    /* } */
 
-        device_remove_file(g_sysfs_log_reset_device, (const struct device_attribute *)&dev_attr_log_reset.attr);
-        g_sysfs_log_reset_device = NULL;
-    }
-    if (TRUE == g_has_sysfs_log_reset_device) {
-        device_destroy(g_hw3secws_class, MKDEV(g_major_number, 0));
-        g_has_sysfs_log_reset_device = FALSE;
+    if (NULL != g_sysfs_device) {
+        device_remove_file(g_sysfs_device, (const struct device_attribute *)&dev_attr_rules.attr);
+        device_remove_file(g_sysfs_device, (const struct device_attribute *)&dev_attr_log_reset.attr);
+        g_sysfs_device = NULL;
     }
 
-    if (NULL != g_sysfs_rules_device) {
-        device_remove_file(g_sysfs_rules_device, (const struct device_attribute *)&dev_attr_rules.attr);
-        g_sysfs_rules_device = NULL;
-    }
     if (TRUE == g_has_sysfs_rules_device) {
         device_destroy(g_hw3secws_class, MKDEV(g_major_number, 0));
         g_has_sysfs_rules_device = FALSE;
@@ -373,7 +400,7 @@ log_modify(struct device *dev, struct device_attribute *attr, const char *buf, s
     }
 
     if ('0' == buf[0]) {
-        zero_counters();
+        FW_LOG_reset_logs();
         result = count;
     }
 

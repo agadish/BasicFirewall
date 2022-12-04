@@ -53,6 +53,7 @@ FW_LOG_log_match(const rule_t *rule,
                  const struct sk_buff *skb);
 
 
+#if 0
 /**
  * @brief Create a dump context. Required to call before performing a log dump
  * 
@@ -64,15 +65,17 @@ FW_LOG_log_match(const rule_t *rule,
  */
 result_t
 FW_LOG_init_dump_context(log_dump_context_t **context_out);
+#endif /* 0 */
 
-result_t
-FW_LOG_dump(log_dump_context_t *context,
-            uint8_t *out_buffer,
+size_t
+FW_LOG_dump(uint8_t __user *out_buffer,
             size_t buffer_size,
-            size_t *bytes_written_out);
+            loff_t *offset_inout);
 
+#if 0
 void
 FW_LOG_release_dump_context(log_dump_context_t *context);
+#endif
 
 void
 FW_LOG_reset_logs(void);
