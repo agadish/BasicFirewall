@@ -49,8 +49,8 @@ __exit hw3secws_exit(void);
 /**
  * @brief Print a kernel message that indicates a packet was accepted
  */
-static void
-log_accept(void);
+/* static void */
+/* log_accept(void); */
 
 /**
  * @brief Print a kernel message that indicates a packet was dropped
@@ -126,11 +126,11 @@ static DEVICE_ATTR(log_reset, S_IWUSR, NULL, log_modify);
 
 
 /*   F U N C T I O N S    I M P L E M E N T A T I O N S   */
-static void
-log_accept(void)
-{
-    printk(KERN_INFO "*** Packet Accepted ***\n");
-}
+/* static void */
+/* log_accept(void) */
+/* { */
+/*     printk(KERN_INFO "*** Packet Accepted ***\n"); */
+/* } */
 
 /* static void */
 /* log_drop(void) */
@@ -144,13 +144,29 @@ hw3secws_hookfn_forward(
     struct sk_buff *skb,
     const struct nf_hook_state *state
 ){
+
+    __u8 result = NF_DROP;
+    bool_t has_match = FALSE;
+
     UNUSED_ARG(priv);
-    UNUSED_ARG(skb);
     UNUSED_ARG(state);
 
-    log_accept();
+    /* 1. Accept whitelist packets */
+    if (RULE_TABLE_is_whitelist(&g_rule_table, skb)) {
+        result = NF_ACCEPT;
+        goto l_cleanup;
+    }
 
-    return NF_ACCEPT;
+    /* 2. Check the rule table */
+    has_match = RULE_TABLE_check(&g_rule_table, skb, &result);
+    /* 3. If it doesn't have match - drop it */
+    if (!has_match) {
+        result = NF_DROP;
+    }
+
+l_cleanup:
+
+    return (unsigned int)result;
 }
 
 static inline void

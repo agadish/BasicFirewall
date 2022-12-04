@@ -41,15 +41,14 @@ FORMAT_ip_mask_pack(char *buffer,
     const char * result_inet_ntop = NULL;
     
     /* 1. Convert IP address to string */
+    sa.sin_addr.s_addr = ip_big_endian;
     result_inet_ntop = inet_ntop(AF_INET,
                                  &(sa.sin_addr),
                                  ip_address,
                                  INET_ADDRSTRLEN);
     /* 2. Print address */
-
     if (NULL == result_inet_ntop) {
         /* 2.1. Error converting? use "error" string */
-
         strncpy(buffer, "error", buffer_length);
     } else if (0 == prefix_size) {
         /* 2.2. Empty mask? use "any" string */
@@ -224,7 +223,7 @@ FORMAT_ip_mask_unpack(char *ip_str,
             result = E__INET_PTON_ERROR;
             goto l_cleanup;
         }
-        *ip_out = htonl(ip_address.s_addr);
+        *ip_out = ip_address.s_addr;
     }
 
     result = E__SUCCESS;
@@ -411,10 +410,12 @@ FORMAT_ip_to_str(char *buffer,
     const char * result_inet_ntop = NULL;
     
     /* 1. Convert IP address to string */
+    sa.sin_addr.s_addr = ip_big_endian;
     result_inet_ntop = inet_ntop(AF_INET,
                                  &(sa.sin_addr),
                                  ip_address,
                                  INET_ADDRSTRLEN);
+    printf("0x%.8x -> \"%s\"\n", ip_big_endian, ip_address);
     /* 2. Copy IP to buffer */
     if (NULL == result_inet_ntop) {
         /* 2.1. Error converting? use "error" string */

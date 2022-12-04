@@ -60,7 +60,7 @@ RULE_TABLE_bin_to_human(rule_table_t *rule_table, const char *path)
     }
 
     /* 2. Read the rules page */
-    read_result = read(fd, rules_buffer, sizeof(rules_buffer));
+    read_result = read(fd, &rules_buffer, sizeof(rules_buffer));
     if ((0 >= read_result) && (0 != errno)) {
         perror("read error");
         result = E__READ_ERROR;
@@ -68,19 +68,18 @@ RULE_TABLE_bin_to_human(rule_table_t *rule_table, const char *path)
     }
 
     /* 3. Verify size */
-    rules_count = (size_t)read_result / sizeof(rule_table->rules[0]);
-
-    /* 3.1. Rules overflow */
-    if (rules_count > MAX_RULES) {
+    /* 3.1. Check Rules overflow */
+    if (read_result > (ssize_t)sizeof(rule_table->rules)) {
         (void)fprintf(stderr,
-                      "ERROR: Got more than %lu (MAX_RULES) rules - got %lu\n",
-                      (unsigned long)MAX_RULES,
-                      (unsigned long)rules_count);
+                      "ERROR: Got more than %lu bytes of  rules - got %lu\n",
+                      (unsigned long)sizeof(rule_table->rules),
+                      (unsigned long)read_result);
         result = E__BIN_RULES_OVERFLOW;
         goto l_cleanup;
     }
 
     /* 3.2. Align mismatch */
+    rules_count = (size_t)read_result / sizeof(rule_table->rules[0]);
     if ((size_t)read_result != rules_count * sizeof(rule_table->rules[0])) {
         (void)fprintf(stderr, "ERROR: Bytes amount doesn't align to rules\n");
         result = E__BIN_RULES_ALIGN_MISMATCH;
@@ -92,13 +91,7 @@ RULE_TABLE_bin_to_human(rule_table_t *rule_table, const char *path)
                  (void *)rules_buffer,
                  (size_t)read_result);
 
-
     rule_table->rules_count = rules_count;
-
-#if 0
-    /* 5. Fix endianness */
-    fix_endianness(rule_table);
-#endif /* 0 */
 
     result = E__SUCCESS;
 l_cleanup:
@@ -106,7 +99,6 @@ l_cleanup:
     CLOSE_SAFE(fd);
     return result;
 }
-
 
 static result_t
 parse_human_to_bin(FILE *file, rule_t *rule_out, bool_t *is_eof_out)

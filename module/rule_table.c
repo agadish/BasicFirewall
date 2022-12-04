@@ -84,11 +84,13 @@ RULE_TABLE_init(rule_table_t *table)
 }
 
 bool_t
+
 RULE_TABLE_set_data(rule_table_t *table,
                     const uint8_t *data,
                     size_t data_length)
 {
     bool_t result = FALSE;
+    size_t i = 0;
     uint8_t rules_count = 0;
 
     /* 1. Calcualte rules_count */
@@ -102,7 +104,11 @@ RULE_TABLE_set_data(rule_table_t *table,
 
     /* 3. Copy rules */
     // TODO: Verify
-    (void)memcpy(table->rules, data, data_length);
+    (void)memcpy(&table->rules, data, data_length);
+    for (i = 0 ; i < table->rules_count ; ++i) {
+        const rule_t *r = &table->rules[i];
+        UNUSED_ARG(r);
+    }
     table->rules_count = rules_count;
 
     result = TRUE;
@@ -123,6 +129,7 @@ RULE_TABLE_dump_data(const rule_table_t *table,
 {
     bool_t result = FALSE;
     size_t required_length = 0;
+    size_t i = 0;
 
     if ((NULL == table) || (NULL == buffer) || (NULL == buffer_size_inout)) {
         goto l_cleanup;
@@ -135,11 +142,41 @@ RULE_TABLE_dump_data(const rule_table_t *table,
 
     (void)memcpy(buffer, &table->rules, required_length);
     *buffer_size_inout = required_length;
+    printk(KERN_INFO "dump_data len %d, %d rules_count, sizeof(rule_table)=%lu\n", required_length ,table->rules_count, (unsigned long)sizeof(table));
+    for (i = 0 ; i < table->rules_count ; ++i) {
+        const rule_t *r = &table->rules[i];
+        printk(KERN_INFO "rule %s: srcip %.8x/%d dstip %.8x/%d\n", r->rule_name, r->src_ip, r->src_prefix_size, r->dst_ip, r->dst_prefix_size);
+    }
 
     result = TRUE;
 l_cleanup:
 
     return result;
+}
+
+bool_t
+RULE_TABLE_is_whitelist(const rule_table_t *table,
+                        const struct sk_buff *skb)
+{
+    bool_t is_whitelist = FALSE;
+
+    /* 0. Input validation */
+    if ((NULL == table) || (NULL == skb)) {
+        printk(KERN_WARNING "RULE_TABLE_is_whitelist got invalid input\n");
+        goto l_cleanup;
+    }
+
+    /* NOTE: forward chain shouldn't have loopback packets, but this is a
+     *       requirement of the exercise */
+    if ((!is_tcp_udp_icmp_packet(skb)) ||
+        is_loopback_packet(skb))
+    {
+        is_whitelist = TRUE;
+    }
+
+l_cleanup:
+
+    return is_whitelist;
 }
 
 bool_t
@@ -150,44 +187,27 @@ RULE_TABLE_check(const rule_table_t *table,
     bool_t does_match = FALSE;
     size_t i = 0 ;
 
+    /* 0. Input validation */
     if ((NULL == table) || (NULL == skb) || (NULL == action_out)) {
 
         printk(KERN_WARNING "RULE_TABLE_check got invalid input\n");
         goto l_cleanup;
     }
 
-    /* 1. Check if the packet has an handled protocol (TCP/UDP/ICMP) */
-    if (!is_tcp_udp_icmp_packet(skb)) {
-        *action_out = NF_ACCEPT;
-        goto l_cleanup;
-
-    }
-
-    /* 2. Ignore loopback packets */
-    /* NOTE: forward chain shouldn't have loopback packets, but this is a
-     *       requirement of the exercise */
-    if (!is_loopback_packet(skb)) {
-        *action_out = NF_ACCEPT;
-        goto l_cleanup;
-
-    }
-
-    /* 3. Go over the rules list */
+    /* 1. Go over the rules list */
     for (i = 0 ; i < table->rules_count ; ++i) {
         const rule_t * current_rule = &table->rules[i];
 
         if (does_match_rule(current_rule, skb)) {
             /* Found a match - break */
             *action_out = current_rule->action;
+            printk(KERN_DEBUG "FOUND MATCHING RULE \"%s\": action %d\n", current_rule->rule_name, current_rule->action);
 
             does_match = TRUE;
             break;
         }
     }
     
-    /* 4. No rule has matched? drop the packet */
-    *action_out = NF_DROP;
-
 l_cleanup:
 
     return does_match;
@@ -217,7 +237,7 @@ is_loopback_packet(const struct sk_buff *skb)
 
     if (IS_LOOPBACK_ADDRESS(ip_header->saddr) && IS_LOOPBACK_ADDRESS(ip_header->daddr))
     {
-        printk(KERN_INFO "found loopback packet\n");
+        printk(KERN_INFO "Found loopback packet\n");
         result = TRUE;
     }
 
@@ -236,6 +256,7 @@ get_packet_direction(const struct sk_buff *skb)
     } else if (0 == strncmp(iface_name, OUT_INTERFACE, name_length)) {
         direction = DIRECTION_OUT;
     } else {
+        printk(KERN_INFO "direction UNKNOWN: got %s\n", iface_name);
         direction = DIRECTION_UNKNOWN;
     }
 

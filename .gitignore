@@ -54,3 +54,4 @@ dkms.conf
 .cache.mk
 *.txt
 main
+tags

@@ -62,6 +62,19 @@ RULE_TABLE_dump_data(const rule_table_t *table,
 
 
 /**
+ * @brief Check if a packet is on the whitelist.
+ *        The whitelist includes non-TCP/UDP/ICMP packets, and loopback packets
+ * 
+ * @param[in] table Table with the rules
+ * @param[in] skb The packet to check
+ *
+ * @return TRUE if packet is in the whitelist, otherwise FALSE
+ */
+bool_t
+RULE_TABLE_is_whitelist(const rule_table_t *table,
+                        const struct sk_buff *skb);
+
+/**
  * @brief Match a given packet against the whole rule table, and return the
  *        required action
  * 
@@ -70,7 +83,7 @@ RULE_TABLE_dump_data(const rule_table_t *table,
  * @param[out] action_out The decision made by the function, valid only if the
  *             function returned TRUE. can be eiter NF_ACCEPT or NF_DROP
  *
- * @return NF_ACCEPT or NF_DROP
+ * @return TRUE if packet matched a rule, otherwise FALSE
  *
  * @remark If the packet doesn't match the table then nothing will be written
  *         to action_out parameter

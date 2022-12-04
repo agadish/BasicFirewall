@@ -99,6 +99,7 @@ typedef struct {
 } log_row_t;
 
 // Table of rules
+#pragma pack(1)
 typedef struct rule_table_s {
     __u8 rules_count;
     rule_t rules[MAX_RULES];
