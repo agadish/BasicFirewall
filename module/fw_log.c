@@ -73,7 +73,7 @@ static void
 init_log_row(log_row_t *row, const struct sk_buff *skb);
 
 static void
-touch_log_row(log_row_t *row, reason_t reason);
+touch_log_row(log_row_t *row, __u8 action, reason_t reason);
 
 static log_row_t *
 search_log_entry(const struct sk_buff *skb);
@@ -177,7 +177,8 @@ init_log_row(log_row_t *row, const struct sk_buff *skb)
     row->timestamp = 0;
     row->src_ip = ip_header->saddr;
     row->dst_ip = ip_header->daddr;
-    switch (skb->protocol)
+
+    switch (ip_header->protocol)
     {
     case IPPROTO_TCP:
         tcp_header = (struct tcphdr *)skb_transport_header(skb);
@@ -191,6 +192,7 @@ init_log_row(log_row_t *row, const struct sk_buff *skb)
         break;
     case IPPROTO_ICMP:
     default:
+        printk(KERN_INFO "UNKNOWN PROTOOO PORTS ARE ZERO\n");
         row->src_port = 0;
         row->dst_port = 0;
         break;
@@ -198,15 +200,16 @@ init_log_row(log_row_t *row, const struct sk_buff *skb)
 }
 
 static void
-touch_log_row(log_row_t *row, reason_t reason)
+touch_log_row(log_row_t *row, __u8 action, reason_t reason)
 {
     struct timespec timespec = {0};
 
     /* printk(KERN_INFO "touching the log!..."); */
     getnstimeofday(&timespec);
     row->timestamp = timespec.tv_sec;
-    ++(row->count);
     row->reason = reason;
+    row->action = action;
+    ++(row->count);
 }
 
 static bool_t
@@ -222,11 +225,11 @@ does_log_row_match(const log_row_t *row,
         (row->dst_ip != ip_header->daddr) ||
         (row->protocol != protocol))
     {
-        /* printk(KERN_INFO "%s: fell for IP/protocol: req %.8x->%.8x %d, got %.8x->%.8x %d\n", __func__, */
+        printk(KERN_INFO "%s: fell for IP/protocol: req %.8x->%.8x %d, got %.8x->%.8x %d\n", __func__,
 
-        /*         row->src_ip, row->dst_ip, row->protocol, */
-        /*         ip_header->saddr, ip_header->daddr, protocol */
-        /*         ); */
+                row->src_ip, row->dst_ip, row->protocol,
+                ip_header->saddr, ip_header->daddr, protocol
+                );
         goto l_cleanup;
     }
 
@@ -238,7 +241,7 @@ does_log_row_match(const log_row_t *row,
         if ((row->src_port != tcp_header->source) ||
             (row->dst_port != tcp_header->dest))
         {
-        printk(KERN_INFO "%s: fell for tcp port\n", __func__);
+            printk(KERN_INFO "%s: fell for tcp port: src%x/%x dst%x/%x\n", __func__, row->src_port, tcp_header->source, row->dst_port, tcp_header->dest);
             goto l_cleanup;
         }
     /* 2.2. UDP */
@@ -247,7 +250,7 @@ does_log_row_match(const log_row_t *row,
         if ((row->src_port != udp_header->source) ||
             (row->dst_port != udp_header->dest))
         {
-        printk(KERN_INFO "%s: fell for udp port\n", __func__);
+            printk(KERN_INFO "%s: fell for udp port\n", __func__);
             goto l_cleanup;
         }
     /* 2.3. ICMP */
@@ -330,7 +333,6 @@ FW_LOG_log_match(const struct sk_buff *skb,
     /* 1. Get the row for this log */
     dest_row = search_log_entry(skb);
     if (NULL == dest_row) {
-        printk(KERN_INFO "Creating entry for log...");
         /* 1. Get a poiner to the matching log_row_t */
         /* 1.1. Make sure we have a free slot at the logs chunk tail */
         result = allocate_new_chunk_if_required();
@@ -349,7 +351,7 @@ FW_LOG_log_match(const struct sk_buff *skb,
     }
 
     /* 2. Touch the row - increase the counter, and update the timestamp */
-    touch_log_row(dest_row, reason);
+    touch_log_row(dest_row, action, reason);
 
 
     result = E__SUCCESS;

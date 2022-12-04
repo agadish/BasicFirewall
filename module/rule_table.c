@@ -25,6 +25,7 @@
 #define DOES_ACK_MATCH(tcp_header, rule) (((tcp_header)->ack) ^ (rule)->ack)
 #define IN_INTERFACE "enp0s8"
 #define OUT_INTERFACE "enp0s9"
+#define LO_INTERFACE "lo"
 #define PORT_1023 (1023)
 #define PORT_1023_N (ntohs(PORT_1023))
 #define LOOPBACK_FIRST_TRIPLET_MASK (127 << 24)
@@ -119,7 +120,8 @@ is_rule_valid(const rule_t *r)
     /* 3. Mask consistency */
     /* 3.1. Source */
     if (GET_IP_MASK(r->src_prefix_size) != r->src_prefix_mask) {
-        printk(KERN_INFO "Invalid rule: src_prefix_size(%x) doesn't match src_prefix_mask(%x)\n", GET_IP_MASK(r->src_prefix_size), r->src_prefix_mask);
+        printk(KERN_INFO
+               "Invalid rule: src_prefix_size doesn't match src_prefix_mask\n");
         goto l_cleanup;
     }
 
@@ -215,6 +217,9 @@ RULE_TABLE_set_data(rule_table_t *table,
     /* 3. Copy rules */
     (void)memcpy(&table->rules, data, data_length);
     table->rules_count = rules_count;
+
+    /* 4. Reset logs */
+    FW_LOG_reset_logs();
 
     result = TRUE;
 
@@ -369,11 +374,11 @@ static bool_t
 is_loopback_packet(const struct sk_buff *skb)
 {
     bool_t result = FALSE;
-    struct iphdr *ip_header = (struct iphdr *)skb_network_header(skb);
+    char *iface_name = skb->dev->name;
+    size_t name_length = ARRAY_SIZE(skb->dev->name);
 
-    if (IS_LOOPBACK_ADDRESS(ip_header->saddr) && IS_LOOPBACK_ADDRESS(ip_header->daddr))
-    {
-        printk(KERN_INFO "Found loopback packet\n");
+    if (0 == strncmp(iface_name, LO_INTERFACE, name_length)) {
+        /* printk(KERN_INFO "Found loopback packet\n"); */
         result = TRUE;
     }
 
@@ -415,6 +420,12 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
     /* 2. Match destionation ip */
     if ((rule->dst_ip & rule->dst_prefix_mask) !=
             (ip_header->daddr & rule->dst_prefix_mask)) {
+        goto l_cleanup;
+    }
+
+    /* 3. Match protocol */
+    if ((PROT_ANY != rule->protocol) && 
+        (ip_header->protocol != rule->protocol)) {
         goto l_cleanup;
     }
 

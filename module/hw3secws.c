@@ -213,16 +213,15 @@ hw3secws_hookfn_forward(
 
     /* 1. Check if xmas packet */
     if (RULE_TABLE_is_xmas_packet(skb)) {
-        struct iphdr *ip_header = (struct iphdr *)skb_network_header(skb);
-        struct tcphdr *tcp_header = NULL;
-
-        if (IPPROTO_TCP == ip_header->protocol || IPPROTO_UDP ==ip_header->protocol) {
-            tcp_header = (struct tcphdr *)skb_transport_header(skb);
-            printk(KERN_INFO "XMAS PACKET src:%.8x dst:%.8x\n", tcp_header->source, tcp_header->dest);
-        } else {
-            printk(KERN_INFO "XMAS PACKET IP_PROTO=%d\n", ip_header->protocol);
-        }
-        printk(KERN_INFO "XMASSSSSSSSSSSSS\n");
+        /* struct iphdr *ip_header = (struct iphdr *)skb_network_header(skb); */
+        /* struct tcphdr *tcp_header = NULL; */
+        /* if (IPPROTO_TCP == ip_header->protocol || IPPROTO_UDP ==ip_header->protocol) { */
+        /*     tcp_header = (struct tcphdr *)skb_transport_header(skb); */
+        /*     printk(KERN_INFO "XMAS PACKET src:%.8x dst:%.8x\n", tcp_header->source, tcp_header->dest); */
+        /* } else { */
+        /*     printk(KERN_INFO "XMAS PACKET IP_PROTO=%d\n", ip_header->protocol); */
+        /* } */
+        /* printk(KERN_INFO "XMASSSSSSSSSSSSS\n"); */
         action = NF_DROP;
         reason = REASON_XMAS_PACKET;
     } else if (RULE_TABLE_is_whitelist(&g_rule_table, skb)) {
@@ -238,11 +237,9 @@ hw3secws_hookfn_forward(
             /* 3.2. No match: drop the packet */
             action = NF_DROP;
             reason = REASON_NO_MATCHING_RULE;
+        } else {
+            printk(KERN_INFO "has match reason=%d action=%d\n", reason, action);
         }
-    }
-
-    if (REASON_XMAS_PACKET == reason) {
-        printk(KERN_INFO "reason_xmas   aaaa\n");
     }
 
     /* 3. Log the packet with the action to the reason */
@@ -428,53 +425,42 @@ l_cleanup:
 static void
 clean_log_driver(void)
 {
-    printk(KERN_INFO "%s: enter\n", __func__);
     if (NULL != g_sysfs_log_device) {
-        printk(KERN_INFO "%s: device_remove_file\n", __func__);
         device_remove_file(g_sysfs_log_device, (const struct device_attribute *)&dev_attr_reset.attr);
         g_sysfs_log_device = NULL;
     }
 
     if (TRUE == g_has_sysfs_log_device) {
-        printk(KERN_INFO "%s: device_destroy\n", __func__);
         device_destroy(g_hw3secws_class, g_log_dev_number);
         g_has_sysfs_log_device = FALSE;
         g_log_dev_number = -1;
     }
 
-    printk(KERN_INFO "%s: cdev_del\n", __func__);
     cdev_del(&g_cdev_logs);
 
     if (INVALID_DEV_T_NUMBER != g_log_dev_number) {
-        printk(KERN_INFO "%s: unregister_chrdev_region\n", __func__);
         unregister_chrdev_region(g_log_dev_number, 1);
         g_log_dev_number = INVALID_DEV_T_NUMBER;
     }
-    printk(KERN_INFO "%s: finish\n", __func__);
 }
 
 static void
 clean_rules_driver(void)
 {
-    printk(KERN_INFO "%s: enter\n", __func__);
     if (NULL != g_sysfs_rules_device) {
-        printk(KERN_INFO "%s: removed file rules\n", __func__);
         device_remove_file(g_sysfs_rules_device, (const struct device_attribute *)&dev_attr_rules.attr);
         g_sysfs_rules_device = NULL;
     }
 
     if (TRUE == g_has_sysfs_rules_device) {
-        printk(KERN_INFO "%s: device_destroy\n", __func__);
         device_destroy(g_hw3secws_class, MKDEV(g_rules_dev_number, 0));
         g_has_sysfs_rules_device = FALSE;
     }
 
     if (INVALID_DEV_T_NUMBER != g_rules_dev_number) {
-        printk(KERN_INFO "%s: unregister_chrdev\n", __func__);
         unregister_chrdev(g_rules_dev_number, RULES_CHAR_DEVICE_NAME);
         g_rules_dev_number = INVALID_DEV_T_NUMBER;
     }
-    printk(KERN_INFO "%s: finish\n", __func__);
 }
 
 static void
@@ -510,16 +496,12 @@ rules_display(struct device *dev, struct device_attribute *attr, char *buf)
     UNUSED_ARG(dev);
     UNUSED_ARG(attr);
 
-    printk(KERN_INFO "rules_display\tgot %lu rules\n", (unsigned long)g_rule_table.rules_count);
-
     was_modified = RULE_TABLE_dump_data(&g_rule_table, buf, &buffer_length);
     if (FALSE == was_modified) {
         result = -1;
         goto l_cleanup;
     }
 
-
-    printk(KERN_INFO "rules_display\tcopied %lu bytes\n", (unsigned long)buffer_length);
     result = (ssize_t)buffer_length;
 l_cleanup:
 
@@ -532,14 +514,10 @@ rules_modify(struct device *dev, struct device_attribute *attr, const char *buf,
     ssize_t result = 0;
     bool_t was_modified = FALSE;
 
-    printk(KERN_INFO "%s was called\n", __func__);
-
     was_modified = RULE_TABLE_set_data(&g_rule_table, buf, count);
     if (was_modified) {
         result = count;
     }
-    printk(KERN_INFO "%s was called, was_modified=%d\n", __func__, was_modified);
-
 
     return result;
 }
@@ -549,7 +527,6 @@ log_modify(struct device *dev, struct device_attribute *attr, const char *buf, s
 {
     ssize_t result = 0;
 
-    printk(KERN_INFO "%s was called\n", __func__);
     if (0 == count) {
         goto l_cleanup;
     }
