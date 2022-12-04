@@ -101,30 +101,39 @@ FORMAT_ack_to_str(ack_t ack)
     return result;
 }
 
-const char *
-FORMAT_reason_to_str(reason_t reason)
+void
+FORMAT_reason_to_str(char *reason_str, size_t max_length, reason_t reason_code)
 {
-    const char * result = NULL;
-    switch (reason)
-    {
-    case REASON_FW_INACTIVE:
-        result = "REASON_FW_INACTIVE";
-        break;
-    case REASON_NO_MATCHING_RULE:
-        result = "REASON_NO_MATCHING_RULE";
-        break;
-    case REASON_XMAS_PACKET:
-        result = "REASON_XMAS_PACKET";
-        break;
-    case REASON_ILLEGAL_VALUE:
-        result = "REASON_ILLEGAL_VALUE";
-        break;
-    default:
-        result = "REASON_UNKNOWN";
-        break;
+    const char * desc = NULL;
+    if (0 <= reason_code) {
+        /* a. Positive reason: rule index */
+        snprintf(reason_str, max_length, "%d", reason_code);
+    } else {
+        /* b. Negative reason: error */
+        /* b.1. Convert error code to str */
+        switch (reason_code)
+        {
+            case REASON_FW_INACTIVE:
+                desc = "REASON_FW_INACTIVE";
+                break;
+            case REASON_NO_MATCHING_RULE:
+                desc = "REASON_NO_MATCHING_RULE";
+                break;
+            case REASON_XMAS_PACKET:
+                desc = "REASON_XMAS_PACKET";
+                break;
+            case REASON_ILLEGAL_VALUE:
+                desc = "REASON_ILLEGAL_VALUE";
+                break;
+            default:
+                desc = "REASON_UNKNOWN";
+                break;
+        }
+
+        /* b.2. Copy error code */
+        (void)strncpy(reason_str, desc, max_length);
     }
 
-    return result;
 }
 
 const char *
@@ -393,7 +402,7 @@ FORMAT_get_date_string(char *date, size_t buffer_length)
     now = time(NULL);
     t = localtime(&now);
 
-    result_strftime = strftime(date, buffer_length - 1, "%d/%m/%Y %h:%M:%S", t);
+    result_strftime = strftime(date, buffer_length - 1, "%d/%m/%Y %H:%M:%S", t);
     if (0 == result_strftime) {
         (void)strncpy(date, "UNKNOWN DATE", buffer_length);
     }

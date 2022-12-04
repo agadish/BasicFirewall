@@ -25,6 +25,7 @@
 #define MAX_USER_PORT (1023)
 #define GET_IP_MASK(n) (~((1 << (32 - (n))) - 1))
 #define DATE_STRING_MAX_LENGTH (100)
+#define REASON_STRING_MAX (30)
 
 
 /*   F U N C T I O N S   D E C L A R A T I O N S   */
@@ -81,8 +82,8 @@ FORMAT_ip_to_str(char *buffer,
                  size_t buffer_length,
                  uint32_t ip_big_endian);
 
-const char *
-FORMAT_reason_to_str(reason_t reason);
+void
+FORMAT_reason_to_str(char *reason_str, size_t max_length, reason_t reason_code);
 
 
 #endif /* __FORMAT_H__ */

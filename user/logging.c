@@ -46,8 +46,8 @@ print_log_row(log_row_t *log_row);
 static void
 print_log_title(void)
 {
-    (void)printf("timestamp			src_ip			dst_ip			src_port	dst_port	"
-                 "protocol	action	reason				count\n");
+    (void)printf("timestamp		src_ip		dst_ip		src_port	dst_port	"
+                 "protocol	action	reason		count\n");
 }
 
 static void
@@ -56,6 +56,7 @@ print_log_row(log_row_t *row)
     char date[DATE_STRING_MAX_LENGTH] = {0};
     char src_ip[IP_STRING_MAX] = {0};
     char dst_ip[IP_STRING_MAX] = {0};
+    char reason[REASON_STRING_MAX] = {0};
     uint16_t src_port = 0;
     uint16_t dst_port = 0;
 
@@ -65,6 +66,7 @@ print_log_row(log_row_t *row)
     FORMAT_ip_to_str(dst_ip, sizeof(dst_ip), row->dst_ip);
     src_port = ntohs(row->src_port);
     dst_port = ntohs(row->dst_port);
+    FORMAT_reason_to_str(reason, sizeof(reason), row->reason);
 
     (void)printf("%s\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%lu\n",
             date,
@@ -74,7 +76,7 @@ print_log_row(log_row_t *row)
             dst_port,
             FORMAT_protocol_to_str(row->protocol),
             FORMAT_action_to_str(row->action),
-            FORMAT_reason_to_str(row->reason),
+            reason,
             (unsigned long)row->count);
 }
 

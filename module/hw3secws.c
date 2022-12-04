@@ -330,7 +330,11 @@ init_rules_driver(void)
 
     /* 2. Create sysfs rules device */
     /* 2.1. Create device */
-    g_sysfs_rules_device = device_create(g_hw3secws_class, NULL, MKDEV(g_major_number_rules, 0), NULL, SYSFS_RULES_DEVICE_NAME);
+    g_sysfs_rules_device = device_create(g_hw3secws_class,
+                                         NULL,
+                                         MKDEV(g_major_number_rules, 0),
+                                         NULL,
+                                         SYSFS_RULES_DEVICE_NAME);
     if (NULL == g_sysfs_rules_device) {
         result = -1;
         goto l_cleanup;
