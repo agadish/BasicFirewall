@@ -13,6 +13,7 @@
 #include "results.h"
 #include "fw_user.h"
 #include "rule_table.h"
+#include "logging.h"
 
 
 /*   M A C R O S   */
@@ -20,6 +21,8 @@
 #define LOAD_RULES_STR "load_rules"
 #define SHOW_LOG_STR "show_log"
 #define CLEAR_LOG_STR "clear_log"
+#define LOGS_CLEAR_PATH "/sys/class/fw/log/reset"
+#define LOGS_PRINT_PATH "/dev/fw_log"
 
 
 /*   F U N C T I O N S    D E C L A R A T I O N S   */
@@ -54,7 +57,6 @@ l_cleanup:
     return result;
 }
 
-
 static result_t
 load_rules(const char *rules_path)
 {
@@ -82,27 +84,42 @@ l_cleanup:
 static result_t
 show_log(void)
 {
-    result_t result = E__UNKNOWN;
-
-    // XXX: todo
-    goto l_cleanup;
-    result = E__SUCCESS;
-l_cleanup:
-
-    return result;
+    return LOGGING_print_logs(LOGS_PRINT_PATH);
 }
 
 static result_t
 clear_log(void)
 {
+    return LOGGING_reset_logs(LOGS_CLEAR_PATH);
+#if 0
     result_t result = E__UNKNOWN;
+    FILE *f = NULL;
+    char clear_command = LOGS_CLEAR_CMD_CHAR;
+    size_t write_result = 0;
 
-    // XXX: todo
-    goto l_cleanup;
+    /* 1. Open logs clear path */
+    f = fopen(LOGS_CLEAR_PATH, "r");
+    if (NULL == f) {
+        perror("Can't open " LOGS_CLEAR_PATH);
+        result = E__FOPEN_ERROR;
+        goto l_cleanup;
+    }
+
+    /* 2. Write the clear command */
+    write_result = fwrite(&clear_command, sizeof(clear_command), 1, f);
+    if (1 > write_result) {
+        (void)fprintf(stderr, "ERROR: writing to %s failed\n", LOGS_CLEAR_PATH);
+        result = E__FWRITE_ERROR;
+        goto l_cleanup;
+    }
+    /* Success */
     result = E__SUCCESS;
 l_cleanup:
 
+    FCLOSE_SAFE(f);
+
     return result;
+#endif
 }
 
 int main(int argc, const char *argv[])

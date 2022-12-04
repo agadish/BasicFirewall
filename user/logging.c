@@ -31,6 +31,7 @@
 #define MAX_USER_PORT (1023)
 #define GET_IP_MASK(n) (~((1 << (32 - (n))) - 1))
 #define LOG_BUFFER_COUNT (4096)
+#define LOGS_CLEAR_CMD_CHAR ('0')
 
 
 /*   F U N C T I O N S    D E C L A R A T I O N S   */
@@ -78,7 +79,7 @@ print_log_row(log_row_t *row)
 }
 
 result_t
-LOGGIG_print_logs(const char *read_logs_path)
+LOGGING_print_logs(const char *read_logs_path)
 {
     result_t result = E__UNKNOWN;
     int fd = INVALID_FD;
@@ -149,13 +150,13 @@ l_cleanup:
     return result;
 }
 
-    result_t
-LOGGIG_reset_logs(const char *reset_logs_path)
+result_t
+LOGGING_reset_logs(const char *reset_logs_path)
 {
     result_t result = E__UNKNOWN;
     int fd = INVALID_FD;
     ssize_t write_result = -1;
-    uint8_t write_data = 0;
+    uint8_t write_data[] = {LOGS_CLEAR_CMD_CHAR};
 
     /* 0. Input validation */
     if (NULL == reset_logs_path) {

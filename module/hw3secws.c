@@ -10,6 +10,7 @@
 #include <linux/kernel.h>
 #include <linux/netfilter.h>
 #include <linux/netfilter_ipv4.h>
+#include <linux/cdev.h>
 #include <asm/string.h>
 
 #include "common.h"
@@ -23,12 +24,13 @@ MODULE_LICENSE("GPL");
 
 /*   M A C R O S   */
 #define INVALID_MAJOR_NUMBER (-1)
-#define CLASS_NAME "fw"
-#define CHAR_DEVICE_NAME "fw_log"
+#define FW_CLASS_NAME "fw"
+#define LOG_CHAR_DEVICE_NAME "fw_log"
+#define RULES_CHAR_DEVICE_NAME "fw_rules"
 #define SYSFS_RULES_DEVICE_NAME "rules"
 #define SYSFS_RULES_FILE_NAME "rules"
-#define SYSFS_LOG_RESET_DEVICE_NAME "log"
-#define SYSFS_LOG_RESET_FILE_NAME "reset"
+#define SYSFS_LOG_DEVICE_NAME "log"
+#define SYSFS_LOG_FILE_NAME "reset"
 
 
 /*   F U N C T I O N S    D E C L A R A T I O N S   */
@@ -77,8 +79,20 @@ hw3secws_hookfn_forward(
 static int
 init_drivers(void);
 
+static int
+init_log_driver(void);
+
+static int
+init_rules_driver(void);
+
 static void
 clean_drivers(void);
+
+static void
+clean_log_driver(void);
+
+static void
+clean_rules_driver(void);
 
 static int
 register_hooks(void);
@@ -125,16 +139,23 @@ static struct file_operations g_fw_log_fops = {
     .read = fw_log_read,
 };
 
-static int g_major_number = INVALID_MAJOR_NUMBER;
+static struct file_operations g_fw_rules_fops = {
+    .owner = THIS_MODULE,
+};
+
+static int g_major_number_log = INVALID_MAJOR_NUMBER;
+static int g_major_number_rules = INVALID_MAJOR_NUMBER;
 static struct class *g_hw3secws_class = NULL;
-static struct device *g_sysfs_device = NULL;
+static struct device *g_sysfs_log_device = NULL;
+static struct device *g_sysfs_rules_device = NULL;
 static bool_t g_has_sysfs_rules_device = FALSE;
-/* static struct device *g_sysfs_log_reset_device = NULL; */
-/* static bool_t g_has_sysfs_log_reset_device = FALSE; */
+static bool_t g_has_sysfs_log_device = FALSE;
+static struct cdev g_cdev_logs;
+
 static rule_table_t g_rule_table;
 
 static DEVICE_ATTR(rules, S_IWUSR | S_IRUGO, rules_display, rules_modify); 
-static DEVICE_ATTR(log_reset, S_IWUSR, NULL, log_modify); 
+static DEVICE_ATTR(reset, S_IWUSR, NULL, log_modify); 
 
 
 /*   F U N C T I O N S    I M P L E M E N T A T I O N S   */
@@ -238,38 +259,87 @@ l_cleanup:
 }
 
 static int
-init_drivers(void)
+init_log_driver(void)
+{
+    int result = 0;
+    int result_device_create_file = -1;
+    dev_t log_dev_number = 0;
+
+    /* 1. Create character devices */
+    /* g_major_number_log = register_chrdev(0, LOG_CHAR_DEVICE_NAME, &g_fw_log_fops); */
+    log_dev_number = 0;
+    g_major_number_log = alloc_chrdev_region(&log_dev_number, 0, 1, LOG_CHAR_DEVICE_NAME);
+    if (0 > g_major_number_log) {
+        printk(KERN_ERR "register_chrdev failed for %s\n", LOG_CHAR_DEVICE_NAME);
+        result = -1;
+        goto l_cleanup;
+    }
+
+    cdev_init(&g_cdev_logs, &g_fw_log_fops);
+    result = cdev_add(&g_cdev_logs, log_dev_number, 1);
+    if (0 != result) {
+        printk(KERN_ERR "cdev_add failed with %d\n", result);
+        goto l_cleanup;
+    }
+
+    /* 2. Create sysfs rules device */
+    g_sysfs_log_device = device_create(g_hw3secws_class, NULL, log_dev_number, NULL, SYSFS_LOG_DEVICE_NAME);
+    if (IS_ERR(g_hw3secws_class)) {
+        result = -1;
+        goto l_cleanup;
+    }
+    g_has_sysfs_log_device = TRUE;
+    printk(KERN_INFO "RUN FOR FW: sudo mknod /dev/%s c %d %d\n", LOG_CHAR_DEVICE_NAME, MAJOR(log_dev_number), MINOR(log_dev_number));
+
+
+    /* 3. Create sysfs device */
+    result_device_create_file = device_create_file(
+        g_sysfs_log_device,
+        (const struct device_attribute *)&dev_attr_reset.attr
+    );
+    if (0 != result_device_create_file) {
+        result = -1;
+        goto l_cleanup;
+    }
+
+    /* 4. Create /dev/fw_log */
+    /* cdev_init(&my_cdev,  */
+
+    result = 0;
+l_cleanup:
+    if (0 != result) {
+        clean_log_driver();
+    }
+
+	return result;
+}
+
+static int
+init_rules_driver(void)
 {
     int result = 0;
     int result_device_create_file = -1;
 
-    /* 1. Create character device */
-    g_major_number = register_chrdev(0, CHAR_DEVICE_NAME, &g_fw_log_fops);
-    if (0 > g_major_number) {
-        printk(KERN_ERR "register_chrdev failed for %s\n", CHAR_DEVICE_NAME);
+    /* 1. Create character devices */
+    g_major_number_rules = register_chrdev(0, RULES_CHAR_DEVICE_NAME, &g_fw_rules_fops);
+    if (0 > g_major_number_rules) {
+        printk(KERN_ERR "register_chrdev failed for %s\n", RULES_CHAR_DEVICE_NAME);
         result = -1;
         goto l_cleanup;
     }
 
-    /* 2. Create sysfs class */
-    g_hw3secws_class = class_create(THIS_MODULE, CLASS_NAME);
-    if (IS_ERR(g_hw3secws_class)) {
-        result = -1;
-        goto l_cleanup;
-    }
-        
-    /* 3. Create sysfs rules device */
-    /* 3.1. Create device */
-    g_sysfs_device = device_create(g_hw3secws_class, NULL, MKDEV(g_major_number, 0), NULL, SYSFS_RULES_DEVICE_NAME);
-    if (IS_ERR(g_hw3secws_class)) {
+    /* 2. Create sysfs rules device */
+    /* 2.1. Create device */
+    g_sysfs_rules_device = device_create(g_hw3secws_class, NULL, MKDEV(g_major_number_rules, 0), NULL, SYSFS_RULES_DEVICE_NAME);
+    if (NULL == g_sysfs_rules_device) {
         result = -1;
         goto l_cleanup;
     }
     g_has_sysfs_rules_device = TRUE;
 
-    /* 3.2. Create file attributes */
+    /* 3. Create sysfs device */
     result_device_create_file = device_create_file(
-        g_sysfs_device,
+        g_sysfs_rules_device,
         (const struct device_attribute *)&dev_attr_rules.attr
     );
     if (0 != result_device_create_file) {
@@ -277,25 +347,37 @@ init_drivers(void)
         goto l_cleanup;
     }
 
-    /* 4. Create sysfs reset device */
-    /* 4.1. Create device */
-    /* g_sysfs_log_reset_device = device_create(g_hw3secws_class, NULL, MKDEV(g_major_number, 0), NULL, SYSFS_LOG_RESET_DEVICE_NAME); */
-    /* if (IS_ERR(g_hw3secws_class)) { */
-    /*     result = -1; */
-    /*     goto l_cleanup; */
-    /* } */
-    /* g_has_sysfs_log_reset_device = TRUE; */
+    result = 0;
+l_cleanup:
+    if (0 != result) {
+        clean_rules_driver();
+    }
 
-    /* 4.2. Create file attributes */
-    result_device_create_file = device_create_file(
-        g_sysfs_device,
-        (const struct device_attribute *)&dev_attr_log_reset.attr
-    );
-    if (0 != result_device_create_file) {
+	return result;
+}
+
+static int
+init_drivers(void)
+{
+    int result = 0;
+
+    /* 1. Create sysfs class */
+    g_hw3secws_class = class_create(THIS_MODULE, FW_CLASS_NAME);
+    if (IS_ERR(g_hw3secws_class)) {
         result = -1;
         goto l_cleanup;
     }
+    /* 2. Init log drivers */
+    result = init_log_driver();
+    if (0 != result) {
+        goto l_cleanup;
+    }
 
+    /* 3. Init rules drivers */
+    result = init_rules_driver();
+    if (0 != result) {
+        goto l_cleanup;
+    }
         
     /* Success */
     result = 0;
@@ -308,33 +390,58 @@ l_cleanup:
 }
 
 static void
-clean_drivers(void)
+clean_log_driver(void)
 {
-    /* if (NULL != g_sysfs_log_reset_device) { */
-    /*  */
-    /*     device_remove_file(g_sysfs_log_reset_device, (const struct device_attribute *)&dev_attr_log_reset.attr); */
-    /*     g_sysfs_log_reset_device = NULL; */
-    /* } */
+    if (NULL != g_sysfs_log_device) {
+        device_remove_file(g_sysfs_log_device, (const struct device_attribute *)&dev_attr_reset.attr);
+        g_sysfs_log_device = NULL;
+    }
 
-    if (NULL != g_sysfs_device) {
-        device_remove_file(g_sysfs_device, (const struct device_attribute *)&dev_attr_rules.attr);
-        device_remove_file(g_sysfs_device, (const struct device_attribute *)&dev_attr_log_reset.attr);
-        g_sysfs_device = NULL;
+    if (TRUE == g_has_sysfs_log_device) {
+        device_destroy(g_hw3secws_class, MKDEV(g_major_number_log, 0));
+        g_has_sysfs_log_device = FALSE;
+    }
+
+    cdev_del(&g_cdev_logs);
+
+    if (INVALID_MAJOR_NUMBER != g_major_number_log) {
+        unregister_chrdev(g_major_number_log, LOG_CHAR_DEVICE_NAME);
+        g_major_number_log = INVALID_MAJOR_NUMBER;
+    }
+}
+
+static void
+clean_rules_driver(void)
+{
+    if (NULL != g_sysfs_rules_device) {
+        device_remove_file(g_sysfs_rules_device, (const struct device_attribute *)&dev_attr_rules.attr);
+        g_sysfs_rules_device = NULL;
     }
 
     if (TRUE == g_has_sysfs_rules_device) {
-        device_destroy(g_hw3secws_class, MKDEV(g_major_number, 0));
+        device_destroy(g_hw3secws_class, MKDEV(g_major_number_rules, 0));
         g_has_sysfs_rules_device = FALSE;
     }
 
+    if (INVALID_MAJOR_NUMBER != g_major_number_rules) {
+        unregister_chrdev(g_major_number_rules, RULES_CHAR_DEVICE_NAME);
+        g_major_number_rules = INVALID_MAJOR_NUMBER;
+    }
+}
+
+static void
+clean_drivers(void)
+{
+    /* 1. Clean rules driver */
+    clean_rules_driver();
+
+    /* 2. Clean log driver */
+    clean_log_driver();
+
+    /* 3. Destroy class */
     if (NULL != g_hw3secws_class) {
         class_destroy(g_hw3secws_class);
         g_hw3secws_class = NULL;
-    }
-
-    if (INVALID_MAJOR_NUMBER != g_major_number) {
-        unregister_chrdev(g_major_number, CHAR_DEVICE_NAME);
-        g_major_number = INVALID_MAJOR_NUMBER;
     }
 }
 

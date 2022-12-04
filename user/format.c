@@ -415,7 +415,7 @@ FORMAT_ip_to_str(char *buffer,
                                  &(sa.sin_addr),
                                  ip_address,
                                  INET_ADDRSTRLEN);
-    printf("0x%.8x -> \"%s\"\n", ip_big_endian, ip_address);
+    /* printf("0x%.8x -> \"%s\"\n", ip_big_endian, ip_address); */
     /* 2. Copy IP to buffer */
     if (NULL == result_inet_ntop) {
         /* 2.1. Error converting? use "error" string */
