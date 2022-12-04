@@ -225,11 +225,11 @@ does_log_row_match(const log_row_t *row,
         (row->dst_ip != ip_header->daddr) ||
         (row->protocol != protocol))
     {
-        printk(KERN_INFO "%s: fell for IP/protocol: req %.8x->%.8x %d, got %.8x->%.8x %d\n", __func__,
-
-                row->src_ip, row->dst_ip, row->protocol,
-                ip_header->saddr, ip_header->daddr, protocol
-                );
+        /* printk(KERN_INFO "%s: fell for IP/protocol: req %.8x->%.8x %d, got %.8x->%.8x %d\n", __func__, */
+        /*  */
+        /*         row->src_ip, row->dst_ip, row->protocol, */
+        /*         ip_header->saddr, ip_header->daddr, protocol */
+        /*         ); */
         goto l_cleanup;
     }
 
