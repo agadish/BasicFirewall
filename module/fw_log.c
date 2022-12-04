@@ -233,6 +233,7 @@ does_log_row_match(const log_row_t *row,
         (row->protocol != protocol))
     {
         /* printk(KERN_INFO "%s: fell for IP/protocol: req %.8x->%.8x %d, got %.8x->%.8x %d\n", __func__, */
+
         /*         row->src_ip, row->dst_ip, row->protocol, */
         /*         ip_header->saddr, ip_header->daddr, protocol */
         /*         ); */
@@ -354,13 +355,14 @@ FW_LOG_log_match(const rule_t *rule,
 
         /* 1.3. Initialize the log row */
         init_log_row(rule, rule_index, skb, dest_row);
+
+        /* 1.4. Increate logs count */
+        ++(g_log_tail->write_index);
     }
 
     /* 2. Touch the row - increase the counter, and update the timestamp */
     touch_log_row(dest_row, rule_index);
 
-    /* 3. Increate logs count */
-    ++(g_log_tail->write_index);
 
     result = E__SUCCESS;
 l_cleanup:
@@ -518,5 +520,8 @@ FW_LOG_reset_logs(void)
         KFREE_SAFE(current_entry);
         current_entry = next_entry;
     }
+
+    g_log_tail = NULL;
+    klist_iter_exit(&i);
 }
 
