@@ -26,6 +26,7 @@
 #define IN_INTERFACE "enp0s8"
 #define OUT_INTERFACE "enp0s9"
 #define PORT_1023 (1023)
+#define PORT_1023_N (ntohs(PORT_1023))
 #define LOOPBACK_FIRST_TRIPLET_MASK (127 << 24)
 #define IS_LOOPBACK_ADDRESS(a) (LOOPBACK_FIRST_TRIPLET_MASK == \
         ((a) & LOOPBACK_FIRST_TRIPLET_MASK))
@@ -33,6 +34,7 @@
 #define IS_XMAS_TCP_HEADER(tcp_hdr) ((0 != (tcp_hdr)->fin) && \
                                      (0 != (tcp_hdr)->urg) && \
                                      (0 != (tcp_hdr)->psh))
+#define GET_IP_MASK(n) ((0 == (n)) ? 0 : (~((1 << (32 - (n))) - 1)))
 
 
 /*   F U N C T I O N S   D E C L A R A T I O N S   */
@@ -79,6 +81,13 @@ static direction_t
 get_packet_direction(const struct sk_buff *skb);
 
 
+static bool_t
+are_rules_valid(const rule_t *rules, size_t rules_count);
+
+static bool_t
+is_rule_valid(const rule_t *rule);
+
+
 
 /*   F U N C T I O N S   I M P L E M E N T A T I O N S   */
 void
@@ -89,31 +98,122 @@ RULE_TABLE_init(rule_table_t *table)
     }
 }
 
+
+static bool_t
+is_rule_valid(const rule_t *r)
+{
+    bool_t is_valid = FALSE;
+
+    /* 1. Name */
+    if (sizeof(r->rule_name) <= strnlen(r->rule_name, sizeof(r->rule_name))) {
+        printk(KERN_INFO "Invalid rule: name is too long\n");
+        goto l_cleanup;
+    }
+
+    /* 2. Direction */
+    if (r->direction != ((r->direction) & DIRECTION_ANY)) {
+        printk(KERN_INFO "Invalid rule: direction contains unknown flag\n");
+        goto l_cleanup;
+    }
+
+    /* 3. Mask consistency */
+    /* 3.1. Source */
+    if (GET_IP_MASK(r->src_prefix_size) != r->src_prefix_mask) {
+        printk(KERN_INFO "Invalid rule: src_prefix_size(%x) doesn't match src_prefix_mask(%x)\n", GET_IP_MASK(r->src_prefix_size), r->src_prefix_mask);
+        goto l_cleanup;
+    }
+
+    /* 3.1. Dst */
+    if (GET_IP_MASK(r->dst_prefix_size) != r->dst_prefix_mask) {
+        printk(KERN_INFO "Invalid rule: dst_prefix_size doesn't match dst_prefix_mask\n");
+        goto l_cleanup;
+    }
+
+    /* 4. Ports larger than 1023 */
+    /* 4.1. Src */
+    if (ntohs(r->src_port) > PORT_1023) {
+        printk(KERN_INFO "Invalid rule: src_port > 1023\n");
+        goto l_cleanup;
+    }
+
+    /* 4.1. Dst */
+    if (ntohs(r->dst_port) > PORT_1023) {
+        printk(KERN_INFO "Invalid rule: dst_port > 1023\n");
+        goto l_cleanup;
+    }
+
+    /* 5. Ack */
+    if (r->ack != ((r->ack) & ACK_ANY)) {
+        printk(KERN_INFO "Invalid rule: ack contains unknown flags\n");
+        goto l_cleanup;
+    }
+
+    /* 6. Action */
+    if ((NF_ACCEPT != r->action) && (NF_DROP != r->action)) {
+        printk(KERN_INFO "Invalid rule: unknown action\n");
+        goto l_cleanup;
+    }
+
+    is_valid = TRUE;
+l_cleanup:
+
+    return is_valid;
+}
+
+static bool_t
+are_rules_valid(const rule_t *rules, size_t rules_count)
+{
+    bool_t are_valid = FALSE;
+    size_t i = 0;
+
+    for (i = 0 ; i < rules_count ; ++i) {
+        if (FALSE == is_rule_valid(&rules[i])) {
+            goto l_cleanup;
+        }
+    }
+
+    are_valid = TRUE;
+l_cleanup:
+
+    return are_valid;
+}
+
 bool_t
 RULE_TABLE_set_data(rule_table_t *table,
                     const uint8_t *data,
                     size_t data_length)
 {
     bool_t result = FALSE;
-    size_t i = 0;
     uint8_t rules_count = 0;
 
     /* 1. Calcualte rules_count */
     rules_count = data_length / sizeof(table->rules[0]);
 
     /* 2. Check if length is correct */
+    /* 2.1. Complete rules */
     if (data_length != rules_count * sizeof(table->rules[0])) {
+        printk(KERN_INFO \
+            "%s: Rule table length isn't a multiple of sizeof(rule_t)=%lu\n",
+            __func__,
+            (unsigned long)sizeof(table->rules[0]));
+        result = FALSE;
+        goto l_cleanup;
+    }
+    /* 2.2. Doesn't override */
+    if (sizeof((table->rules)) < data_length) {
+        printk(KERN_INFO "%s: Rule table is too large\n", __func__);
         result = FALSE;
         goto l_cleanup;
     }
 
-    /* 3. Copy rules */
-    // TODO: Verify
-    (void)memcpy(&table->rules, data, data_length);
-    for (i = 0 ; i < table->rules_count ; ++i) {
-        const rule_t *r = &table->rules[i];
-        UNUSED_ARG(r);
+    /* 3. Validate rules */
+    result = are_rules_valid((rule_t *)data, rules_count);
+    if (FALSE == result) {
+        goto l_cleanup;
     }
+
+    /* 3. Copy rules */
+    (void)memcpy(&table->rules, data, data_length);
     table->rules_count = rules_count;
 
     result = TRUE;
@@ -324,7 +424,7 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
         /* 4.1. Match src port */
         if ((0 != rule->src_port) &&
             (rule->src_port != tcp_header->source) &&
-            ((PORT_1023 == rule->src_port) && tcp_header->source <= PORT_1023))
+            ((PORT_1023_N == rule->src_port) && ntohs(tcp_header->source) <= PORT_1023))
         {
 
             goto l_cleanup;
@@ -333,7 +433,7 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
         /* 4.2. Match dst port */
         if ((0 != rule->dst_port) &&
             (rule->dst_port != tcp_header->dest) &&
-            ((PORT_1023 == rule->dst_port) && tcp_header->dest <= PORT_1023))
+            ((PORT_1023_N == rule->dst_port) && ntohs(tcp_header->dest) <= PORT_1023))
         {
 
             goto l_cleanup;
@@ -349,7 +449,7 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
         /* 4.1. Match src port */
         if ((0 != rule->src_port) &&
             (rule->src_port != udp_header->source) &&
-            ((PORT_1023 == rule->src_port) && udp_header->source <= PORT_1023))
+            ((PORT_1023_N == rule->src_port) && ntohs(udp_header->source) <= PORT_1023))
         {
 
             goto l_cleanup;
@@ -358,7 +458,7 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
         /* 4.2. Match dst port */
         if ((0 != rule->dst_port) &&
             (rule->dst_port != udp_header->dest) &&
-            ((PORT_1023 == rule->dst_port) && udp_header->dest <= PORT_1023))
+            ((PORT_1023_N == rule->dst_port) && ntohs(udp_header->dest) <= PORT_1023))
         {
 
             goto l_cleanup;

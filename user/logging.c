@@ -25,11 +25,6 @@
 #include "logging.h"
 
 /*   M A C R O S   */
-#define IP_ADDRESS_MAX (3 * 4 + 3 + 1)
-#define IP_STRING_MAX (3 * 4 + 3 + 1 + 2 + 1)
-#define PORT_STRING_MAX (5 + 1)
-#define MAX_USER_PORT (1023)
-#define GET_IP_MASK(n) (~((1 << (32 - (n))) - 1))
 #define LOG_BUFFER_COUNT (4096)
 #define LOGS_CLEAR_CMD_CHAR ('0')
 

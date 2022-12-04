@@ -23,7 +23,7 @@
 #define IP_STRING_MAX (3 * 4 + 3 + 1 + 2 + 1)
 #define PORT_STRING_MAX (5 + 1)
 #define MAX_USER_PORT (1023)
-#define GET_IP_MASK(n) (~((1 << (32 - (n))) - 1))
+#define GET_IP_MASK(n) ((0 == (n)) ? 0 : (~((1 << (32 - (n))) - 1)))
 #define DATE_STRING_MAX_LENGTH (100)
 #define REASON_STRING_MAX (30)
 

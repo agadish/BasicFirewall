@@ -224,6 +224,7 @@ FORMAT_ip_mask_unpack(char *ip_str,
         *prefix_size_out = (uint32_t)atol(mask_string);
         /* Remark: IP mask is in network byte order */
         *prefix_mask_out = GET_IP_MASK(*prefix_size_out);
+        printf("IP MASK %s=%.x\n", mask_string, *prefix_mask_out);
 
         /* 4. Process IP address */
         result_inet_pton = inet_pton(AF_INET, ip_str, &ip_address);
