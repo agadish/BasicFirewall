@@ -510,9 +510,10 @@ FW_LOG_reset_logs(void)
     klist_iter_init(&g_log, &i);
     current_entry = (logs_chunk_t *)klist_next(&i); 
 
+    printk("%s: iter_init, current_entry=%p\n", __func__, current_entry);
     while (NULL != current_entry) {
         next_entry = (logs_chunk_t *)klist_next(&i);
-        printk(KERN_INFO "clearing entry that had %d logs\n", next_entry->write_index);
+        printk(KERN_INFO "clearing entry that had %d logs\n", current_entry->write_index);
         klist_del(&current_entry->node);
         KFREE_SAFE(current_entry);
         current_entry = next_entry;
