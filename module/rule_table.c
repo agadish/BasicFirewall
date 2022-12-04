@@ -30,6 +30,10 @@
 #define IS_LOOPBACK_ADDRESS(a) (LOOPBACK_FIRST_TRIPLET_MASK == \
         ((a) & LOOPBACK_FIRST_TRIPLET_MASK))
 
+#define IS_XMAS_TCP_HEADER(tcp_hdr) ((0 != (tcp_hdr)->fin) && \
+                                     (0 != (tcp_hdr)->urg) && \
+                                     (0 != (tcp_hdr)->psh))
+
 
 /*   F U N C T I O N S   D E C L A R A T I O N S   */
 /**
@@ -75,6 +79,7 @@ static direction_t
 get_packet_direction(const struct sk_buff *skb);
 
 
+
 /*   F U N C T I O N S   I M P L E M E N T A T I O N S   */
 void
 RULE_TABLE_init(rule_table_t *table)
@@ -85,7 +90,6 @@ RULE_TABLE_init(rule_table_t *table)
 }
 
 bool_t
-
 RULE_TABLE_set_data(rule_table_t *table,
                     const uint8_t *data,
                     size_t data_length)
@@ -130,7 +134,7 @@ RULE_TABLE_dump_data(const rule_table_t *table,
 {
     bool_t result = FALSE;
     size_t required_length = 0;
-    size_t i = 0;
+    /* size_t i = 0; */
 
     if ((NULL == table) || (NULL == buffer) || (NULL == buffer_size_inout)) {
         goto l_cleanup;
@@ -143,11 +147,11 @@ RULE_TABLE_dump_data(const rule_table_t *table,
 
     (void)memcpy(buffer, &table->rules, required_length);
     *buffer_size_inout = required_length;
-    printk(KERN_INFO "dump_data len %d, %d rules_count, sizeof(rule_table)=%lu\n", required_length ,table->rules_count, (unsigned long)sizeof(table));
-    for (i = 0 ; i < table->rules_count ; ++i) {
-        const rule_t *r = &table->rules[i];
-        printk(KERN_INFO "rule %s: srcip %.8x/%d dstip %.8x/%d\n", r->rule_name, r->src_ip, r->src_prefix_size, r->dst_ip, r->dst_prefix_size);
-    }
+    /* printk(KERN_INFO "dump_data len %d, %d rules_count, sizeof(rule_table)=%lu\n", required_length ,table->rules_count, (unsigned long)sizeof(table)); */
+    /* for (i = 0 ; i < table->rules_count ; ++i) { */
+    /*     const rule_t *r = &table->rules[i]; */
+        /* printk(KERN_INFO "rule %s: srcip %.8x/%d dstip %.8x/%d\n", r->rule_name, r->src_ip, r->src_prefix_size, r->dst_ip, r->dst_prefix_size); */
+    /* } */
 
     result = TRUE;
 l_cleanup:
@@ -181,16 +185,42 @@ l_cleanup:
 }
 
 bool_t
+RULE_TABLE_is_xmas_packet(const struct sk_buff *skb)
+{
+    bool_t result = FALSE;
+    struct iphdr *ip_header = NULL;
+    struct tcphdr *tcp_header = NULL;
+
+    /* 0. Input validation */
+    if (NULL == skb) {
+        goto l_cleanup;
+    }
+
+    /* 1. Check if TCP */
+    ip_header = (struct iphdr *)skb_network_header(skb);
+    if (IPPROTO_TCP != ip_header->protocol) { 
+        goto l_cleanup;
+    }
+
+    tcp_header = (struct tcphdr *)skb_transport_header(skb);
+    result = IS_XMAS_TCP_HEADER(tcp_header);
+
+l_cleanup:
+
+    return result;
+}
+
+bool_t
 RULE_TABLE_check(const rule_table_t *table,
                  const struct sk_buff *skb,
-                 __u8 *action_out)
+                 __u8 *action_out,
+                 reason_t *reason_out)
 {
     bool_t does_match = FALSE;
     size_t i = 0 ;
 
     /* 0. Input validation */
-    if ((NULL == table) || (NULL == skb) || (NULL == action_out)) {
-
+    if ((NULL == table) || (NULL == skb) || (NULL == action_out) || (NULL == reason_out)) {
         printk(KERN_WARNING "RULE_TABLE_check got invalid input\n");
         goto l_cleanup;
     }
@@ -201,17 +231,15 @@ RULE_TABLE_check(const rule_table_t *table,
 
         /* 2. Check if the rule matches the packet  Go over the rules list */
         if (does_match_rule(current_rule, skb)) {
-            /* 3. Found a match */
+            /* 2.1. Found a matching rule */
             does_match = TRUE;
-            printk(KERN_DEBUG "FOUND MATCHING RULE \"%s\": action %d\n", current_rule->rule_name, current_rule->action);
+            /* printk(KERN_DEBUG "FOUND MATCHING RULE \"%s\": action %d\n", current_rule->rule_name, current_rule->action); */
 
-            /* 3.1. Log the match */
-            (void)FW_LOG_log_match(current_rule, i, skb);
-
-            /* 3.2. Return the action */
+            /* 2.2. Return the rule's action,  and the rule id as the reason */
             *action_out = current_rule->action;
+            *reason_out = (reason_t)i;
 
-            /* 3.3. Finish the iteration over the rules list */
+            /* 2.3. Finish the iteration over the rules list */
             break;
         }
     }

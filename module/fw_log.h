@@ -37,9 +37,10 @@ FW_LOG_shutdown(void);
 /**
  * @brief Destroy a rule table
  * 
- * @param[in] rule The rule that caused the match
- * @param[in] rule_index The index of the rule within the table
  * @param[in] skb The packet that caused the match
+ * @param[in] reason Either one of reason_t values or (reason_t)index, with the
+ *                   index of the matching rule
+ * @param[in] action The action done (NF_ACCEPT/NF_DROP)
  *
  * @return TRUE if was set succesfully, FALSE otherwise (probably due to
  *         invalid data)
@@ -48,9 +49,9 @@ FW_LOG_shutdown(void);
  *         will reset the data, discarding the previous rules if existed.
  */
 result_t
-FW_LOG_log_match(const rule_t *rule,
-                 uint8_t rule_index,
-                 const struct sk_buff *skb);
+FW_LOG_log_match(const struct sk_buff *skb, 
+                 __u8 action,
+                 reason_t reason);
 
 
 #if 0

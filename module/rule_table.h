@@ -82,6 +82,8 @@ RULE_TABLE_is_whitelist(const rule_table_t *table,
  * @param[in] skb The packet to check
  * @param[out] action_out The decision made by the function, valid only if the
  *             function returned TRUE. can be eiter NF_ACCEPT or NF_DROP
+ * @param[out] reason_out The reason to the decision. Can be either one of
+ *                        reason_t values, or the rule id casted to reason_t.
  *
  * @return TRUE if packet matched a rule, otherwise FALSE
  *
@@ -91,7 +93,20 @@ RULE_TABLE_is_whitelist(const rule_table_t *table,
 bool_t
 RULE_TABLE_check(const rule_table_t *table,
                  const struct sk_buff *skb,
-                 __u8 *action_out);
+                 __u8 *action_out,
+                 reason_t *reason_out);
+
+/**
+ * @brief Check if a given packet is a TCP packet with FIN+URG+PSH flags
+ * 
+ * @param[in] skb The packet to check
+ *
+ * @return TRUE if xmas packet, otherwise FALSE
+ *
+ * @remark If skb is NULL, the function will return FALSE
+ */
+bool_t
+RULE_TABLE_is_xmas_packet(const struct sk_buff *skb);
 
 
 #endif /* __RULE_TABLE_H__ */

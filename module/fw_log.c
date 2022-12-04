@@ -70,22 +70,16 @@ dump_from_chunk(logs_chunk_t *chunk,
                 loff_t offset_in_chunk);
 
 static void
-init_log_row(const rule_t *rule,
-              uint8_t rule_index,
-              const struct sk_buff *skb,
-              log_row_t *row);
+init_log_row(log_row_t *row, const struct sk_buff *skb);
 
 static void
-touch_log_row(log_row_t *row, uint8_t rule_index);
+touch_log_row(log_row_t *row, reason_t reason);
 
 static log_row_t *
-search_log_entry(const rule_t *rule,
-                 uint8_t rule_index,
-                 const struct sk_buff *skb);
+search_log_entry(const struct sk_buff *skb);
 
 static bool_t
 does_log_row_match(const log_row_t *row,
-                   const rule_t *rule,
                    const struct sk_buff *skb);
 
 
@@ -171,15 +165,12 @@ l_cleanup:
 }
 
 static void
-init_log_row(const rule_t *rule,
-              uint8_t rule_index,
-              const struct sk_buff *skb,
-              log_row_t *row)
+init_log_row(log_row_t *row, const struct sk_buff *skb)
 {
     struct iphdr *ip_header = (struct iphdr *)skb_network_header(skb);
     struct tcphdr *tcp_header = NULL;
     struct udphdr *udp_header = NULL;
-    row->action = (unsigned char)rule->action;
+    row->action = NF_DROP; /* Default */
     row->protocol = (unsigned char)ip_header->protocol;
     row->reason = REASON_FW_INACTIVE;
     row->count = 0;
@@ -207,7 +198,7 @@ init_log_row(const rule_t *rule,
 }
 
 static void
-touch_log_row(log_row_t *row, uint8_t rule_index)
+touch_log_row(log_row_t *row, reason_t reason)
 {
     struct timespec timespec = {0};
 
@@ -215,12 +206,11 @@ touch_log_row(log_row_t *row, uint8_t rule_index)
     getnstimeofday(&timespec);
     row->timestamp = timespec.tv_sec;
     ++(row->count);
-    row->reason = rule_index;
+    row->reason = reason;
 }
 
 static bool_t
 does_log_row_match(const log_row_t *row,
-                   const rule_t *rule,
                    const struct sk_buff *skb)
 {
     bool_t does_match = FALSE;
@@ -276,9 +266,7 @@ l_cleanup:
 }
 
 static log_row_t *
-search_log_entry(const rule_t *rule,
-                 uint8_t rule_index,
-                 const struct sk_buff *skb)
+search_log_entry(const struct sk_buff *skb)
 {
     log_row_t *row = NULL;
     struct klist_iter list_iter = {0};
@@ -319,7 +307,7 @@ search_log_entry(const rule_t *rule,
         for (i = 0 ; i < current_entry->write_index ; ++i) {
             log_row_t *current_row = &current_entry->rows[i];
             /* 3.1. Check if row matches the rule */
-            if (does_log_row_match(current_row, rule, skb)) {
+            if (does_log_row_match(current_row, skb)) {
                 row = current_row;
                 break;
             }
@@ -332,15 +320,15 @@ search_log_entry(const rule_t *rule,
 }
 
 result_t
-FW_LOG_log_match(const rule_t *rule,
-                 uint8_t rule_index,
-                 const struct sk_buff *skb)
+FW_LOG_log_match(const struct sk_buff *skb, 
+                 __u8 action,
+                 reason_t reason)
 {
     result_t result = E__UNKNOWN;
     log_row_t *dest_row = NULL;
 
     /* 1. Get the row for this log */
-    dest_row = search_log_entry(rule, rule_index, skb);
+    dest_row = search_log_entry(skb);
     if (NULL == dest_row) {
         printk(KERN_INFO "Creating entry for log...");
         /* 1. Get a poiner to the matching log_row_t */
@@ -354,14 +342,14 @@ FW_LOG_log_match(const rule_t *rule,
         dest_row = &(g_log_tail->rows[g_log_tail->write_index]);
 
         /* 1.3. Initialize the log row */
-        init_log_row(rule, rule_index, skb, dest_row);
+        init_log_row(dest_row, skb);
 
         /* 1.4. Increate logs count */
         ++(g_log_tail->write_index);
     }
 
     /* 2. Touch the row - increase the counter, and update the timestamp */
-    touch_log_row(dest_row, rule_index);
+    touch_log_row(dest_row, reason);
 
 
     result = E__SUCCESS;
@@ -512,10 +500,10 @@ FW_LOG_reset_logs(void)
     klist_iter_init(&g_log, &i);
     current_entry = (logs_chunk_t *)klist_next(&i); 
 
-    printk("%s: iter_init, current_entry=%p\n", __func__, current_entry);
+    /* printk("%s: iter_init, current_entry=%p\n", __func__, current_entry); */
     while (NULL != current_entry) {
         next_entry = (logs_chunk_t *)klist_next(&i);
-        printk(KERN_INFO "clearing entry that had %d logs\n", current_entry->write_index);
+        /* printk(KERN_INFO "clearing entry that had %d logs\n", current_entry->write_index); */
         klist_del(&current_entry->node);
         KFREE_SAFE(current_entry);
         current_entry = next_entry;

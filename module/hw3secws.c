@@ -23,7 +23,7 @@ MODULE_LICENSE("GPL");
 
 
 /*   M A C R O S   */
-#define INVALID_MAJOR_NUMBER (-1)
+#define INVALID_DEV_T_NUMBER (0)
 #define FW_CLASS_NAME "fw"
 #define LOG_CHAR_DEVICE_NAME "fw_log"
 #define RULES_CHAR_DEVICE_NAME "fw_rules"
@@ -143,8 +143,8 @@ static struct file_operations g_fw_rules_fops = {
     .owner = THIS_MODULE,
 };
 
-static int g_major_number_log = INVALID_MAJOR_NUMBER;
-static int g_major_number_rules = INVALID_MAJOR_NUMBER;
+static dev_t g_log_dev_number = INVALID_DEV_T_NUMBER;
+static dev_t g_rules_dev_number = INVALID_DEV_T_NUMBER;
 static struct class *g_hw3secws_class = NULL;
 static struct device *g_sysfs_log_device = NULL;
 static struct device *g_sysfs_rules_device = NULL;
@@ -204,28 +204,53 @@ hw3secws_hookfn_forward(
     const struct nf_hook_state *state
 ){
 
-    __u8 result = NF_DROP;
+    __u8 action = NF_DROP;
     bool_t has_match = FALSE;
+    reason_t reason = REASON_FW_INACTIVE;
 
     UNUSED_ARG(priv);
     UNUSED_ARG(state);
 
-    /* 1. Accept whitelist packets */
-    if (RULE_TABLE_is_whitelist(&g_rule_table, skb)) {
-        result = NF_ACCEPT;
+    /* 1. Check if xmas packet */
+    if (RULE_TABLE_is_xmas_packet(skb)) {
+        struct iphdr *ip_header = (struct iphdr *)skb_network_header(skb);
+        struct tcphdr *tcp_header = NULL;
+
+        if (IPPROTO_TCP == ip_header->protocol || IPPROTO_UDP ==ip_header->protocol) {
+            tcp_header = (struct tcphdr *)skb_transport_header(skb);
+            printk(KERN_INFO "XMAS PACKET src:%.8x dst:%.8x\n", tcp_header->source, tcp_header->dest);
+        } else {
+            printk(KERN_INFO "XMAS PACKET IP_PROTO=%d\n", ip_header->protocol);
+        }
+        printk(KERN_INFO "XMASSSSSSSSSSSSS\n");
+        action = NF_DROP;
+        reason = REASON_XMAS_PACKET;
+    } else if (RULE_TABLE_is_whitelist(&g_rule_table, skb)) {
+        /* 2. Accept whitelist packets without logging them:
+         *    loopbacks packets, or non-TCP/UDP/ICMP packets */
+        action = NF_ACCEPT;
         goto l_cleanup;
     }
-
-    /* 2. Check the rule table */
-    has_match = RULE_TABLE_check(&g_rule_table, skb, &result);
-    /* 3. If it doesn't have match - drop it */
-    if (!has_match) {
-        result = NF_DROP;
+    else {
+        /* 3. Check the rule table */
+        has_match = RULE_TABLE_check(&g_rule_table, skb, &action, &reason);
+        if (!has_match) {
+            /* 3.2. No match: drop the packet */
+            action = NF_DROP;
+            reason = REASON_NO_MATCHING_RULE;
+        }
     }
+
+    if (REASON_XMAS_PACKET == reason) {
+        printk(KERN_INFO "reason_xmas   aaaa\n");
+    }
+
+    /* 3. Log the packet with the action to the reason */
+    (void)FW_LOG_log_match(skb, action, reason);
 
 l_cleanup:
 
-    return (unsigned int)result;
+    return (unsigned int)action;
 }
 
 static int
@@ -263,34 +288,41 @@ init_log_driver(void)
 {
     int result = 0;
     int result_device_create_file = -1;
-    dev_t log_dev_number = 0;
+    int result_alloc_chrdev_region = -1;
 
     /* 1. Create character devices */
-    /* g_major_number_log = register_chrdev(0, LOG_CHAR_DEVICE_NAME, &g_fw_log_fops); */
-    log_dev_number = 0;
-    g_major_number_log = alloc_chrdev_region(&log_dev_number, 0, 1, LOG_CHAR_DEVICE_NAME);
-    if (0 > g_major_number_log) {
-        printk(KERN_ERR "register_chrdev failed for %s\n", LOG_CHAR_DEVICE_NAME);
+    /* 1.1. Allocate number */
+    g_log_dev_number = INVALID_DEV_T_NUMBER;
+    result_alloc_chrdev_region = alloc_chrdev_region(&g_log_dev_number, 0, 1, LOG_CHAR_DEVICE_NAME);
+    if (0 > result_alloc_chrdev_region) {
+        printk(KERN_ERR "register_chrdev failed for %s: %d\n",
+               LOG_CHAR_DEVICE_NAME,
+               result_alloc_chrdev_region);
         result = -1;
         goto l_cleanup;
     }
 
+    /* 1.2. Initialise operations */
     cdev_init(&g_cdev_logs, &g_fw_log_fops);
-    result = cdev_add(&g_cdev_logs, log_dev_number, 1);
+
+    /* 1.3. Add the device */
+    result = cdev_add(&g_cdev_logs, g_log_dev_number, 1);
     if (0 != result) {
         printk(KERN_ERR "cdev_add failed with %d\n", result);
         goto l_cleanup;
     }
 
     /* 2. Create sysfs rules device */
-    g_sysfs_log_device = device_create(g_hw3secws_class, NULL, log_dev_number, NULL, SYSFS_LOG_DEVICE_NAME);
+    g_sysfs_log_device = device_create(g_hw3secws_class, NULL, g_log_dev_number, NULL, SYSFS_LOG_DEVICE_NAME);
     if (IS_ERR(g_hw3secws_class)) {
         result = -1;
         goto l_cleanup;
     }
     g_has_sysfs_log_device = TRUE;
-    printk(KERN_INFO "RUN FOR FW: sudo mknod /dev/%s c %d %d\n", LOG_CHAR_DEVICE_NAME, MAJOR(log_dev_number), MINOR(log_dev_number));
-
+    printk(KERN_INFO "RUN FOR FW: sudo mknod /dev/%s c %d %d\n",
+           LOG_CHAR_DEVICE_NAME,
+           MAJOR(g_log_dev_number),
+           MINOR(g_log_dev_number));
 
     /* 3. Create sysfs device */
     result_device_create_file = device_create_file(
@@ -321,8 +353,8 @@ init_rules_driver(void)
     int result_device_create_file = -1;
 
     /* 1. Create character devices */
-    g_major_number_rules = register_chrdev(0, RULES_CHAR_DEVICE_NAME, &g_fw_rules_fops);
-    if (0 > g_major_number_rules) {
+    g_rules_dev_number = register_chrdev(0, RULES_CHAR_DEVICE_NAME, &g_fw_rules_fops);
+    if (0 > g_rules_dev_number) {
         printk(KERN_ERR "register_chrdev failed for %s\n", RULES_CHAR_DEVICE_NAME);
         result = -1;
         goto l_cleanup;
@@ -332,7 +364,7 @@ init_rules_driver(void)
     /* 2.1. Create device */
     g_sysfs_rules_device = device_create(g_hw3secws_class,
                                          NULL,
-                                         MKDEV(g_major_number_rules, 0),
+                                         MKDEV(g_rules_dev_number, 0),
                                          NULL,
                                          SYSFS_RULES_DEVICE_NAME);
     if (NULL == g_sysfs_rules_device) {
@@ -396,41 +428,53 @@ l_cleanup:
 static void
 clean_log_driver(void)
 {
+    printk(KERN_INFO "%s: enter\n", __func__);
     if (NULL != g_sysfs_log_device) {
+        printk(KERN_INFO "%s: device_remove_file\n", __func__);
         device_remove_file(g_sysfs_log_device, (const struct device_attribute *)&dev_attr_reset.attr);
         g_sysfs_log_device = NULL;
     }
 
     if (TRUE == g_has_sysfs_log_device) {
-        device_destroy(g_hw3secws_class, MKDEV(g_major_number_log, 0));
+        printk(KERN_INFO "%s: device_destroy\n", __func__);
+        device_destroy(g_hw3secws_class, g_log_dev_number);
         g_has_sysfs_log_device = FALSE;
+        g_log_dev_number = -1;
     }
 
+    printk(KERN_INFO "%s: cdev_del\n", __func__);
     cdev_del(&g_cdev_logs);
 
-    if (INVALID_MAJOR_NUMBER != g_major_number_log) {
-        unregister_chrdev(g_major_number_log, LOG_CHAR_DEVICE_NAME);
-        g_major_number_log = INVALID_MAJOR_NUMBER;
+    if (INVALID_DEV_T_NUMBER != g_log_dev_number) {
+        printk(KERN_INFO "%s: unregister_chrdev_region\n", __func__);
+        unregister_chrdev_region(g_log_dev_number, 1);
+        g_log_dev_number = INVALID_DEV_T_NUMBER;
     }
+    printk(KERN_INFO "%s: finish\n", __func__);
 }
 
 static void
 clean_rules_driver(void)
 {
+    printk(KERN_INFO "%s: enter\n", __func__);
     if (NULL != g_sysfs_rules_device) {
+        printk(KERN_INFO "%s: removed file rules\n", __func__);
         device_remove_file(g_sysfs_rules_device, (const struct device_attribute *)&dev_attr_rules.attr);
         g_sysfs_rules_device = NULL;
     }
 
     if (TRUE == g_has_sysfs_rules_device) {
-        device_destroy(g_hw3secws_class, MKDEV(g_major_number_rules, 0));
+        printk(KERN_INFO "%s: device_destroy\n", __func__);
+        device_destroy(g_hw3secws_class, MKDEV(g_rules_dev_number, 0));
         g_has_sysfs_rules_device = FALSE;
     }
 
-    if (INVALID_MAJOR_NUMBER != g_major_number_rules) {
-        unregister_chrdev(g_major_number_rules, RULES_CHAR_DEVICE_NAME);
-        g_major_number_rules = INVALID_MAJOR_NUMBER;
+    if (INVALID_DEV_T_NUMBER != g_rules_dev_number) {
+        printk(KERN_INFO "%s: unregister_chrdev\n", __func__);
+        unregister_chrdev(g_rules_dev_number, RULES_CHAR_DEVICE_NAME);
+        g_rules_dev_number = INVALID_DEV_T_NUMBER;
     }
+    printk(KERN_INFO "%s: finish\n", __func__);
 }
 
 static void
