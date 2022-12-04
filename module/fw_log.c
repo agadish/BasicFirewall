@@ -10,6 +10,7 @@
 #include <linux/types.h>
 #include <linux/skbuff.h>
 #include <linux/klist.h>
+#include <linux/time.h>
 
 #include "fw.h"
 #include "common.h"
@@ -73,6 +74,25 @@ dump_from_chunk(log_dump_context_t *ctx,
                 uint8_t *out_buffer,
                 size_t buffer_size);
 
+static void
+init_log_row(const rule_t *rule,
+              uint8_t rule_index,
+              const struct sk_buff *skb,
+              log_row_t *row);
+
+static void
+touch_log_row(log_row_t *row, uint8_t rule_index);
+
+static log_row_t *
+search_log_entry(const rule_t *rule,
+                 uint8_t rule_index,
+                 const struct sk_buff *skb);
+
+static bool_t
+does_log_row_match(const log_row_t *row,
+                   const rule_t *rule,
+                   const struct sk_buff *skb);
+
 
 /*   F U N C T I O N S   I M P L E M E N T A T I O N S   */
 static result_t
@@ -108,30 +128,11 @@ static result_t
 allocate_new_chunk_if_required(void)
 {
     result_t result = E__UNKNOWN;
-#if 0
-    bool_t is_occupied = FALSE;
-
-    /* 1. If no chunks are allocated, allocate the first chunk */
-    if (NULL == g_logs_tail) {
-        result = init_logs();
-        if (E__SUCCESS != result) {
-            goto l_cleanup; 
-        }
-    /* 2. If first chunk is allocated - check if it has space left */
-    } else {
-        is_occupied = (ROWS_PER_CHUNK == (g_logs_tail->write_index + 1));
-        if (is_occupied) {
-            /* 2.1. Allocate a new tail */
-        }
-    }
-#endif /* 0 */
-
-
 
     if ((NULL == g_log_tail) ||
         ((ROWS_PER_CHUNK - 1) <= g_log_tail->write_index))
     {
-
+        printk(KERN_INFO "allocating new chunk for node...");
         result = add_tail();
         if (E__SUCCESS != result) {
             goto l_cleanup;
@@ -174,21 +175,194 @@ l_cleanup:
     return result;
 }
 
+static void
+init_log_row(const rule_t *rule,
+              uint8_t rule_index,
+              const struct sk_buff *skb,
+              log_row_t *row)
+{
+    struct iphdr *ip_header = (struct iphdr *)skb_network_header(skb);
+    struct tcphdr *tcp_header = NULL;
+    struct udphdr *udp_header = NULL;
+    row->action = (unsigned char)rule->action;
+    row->protocol = (unsigned char)ip_header->protocol;
+    row->reason = REASON_FW_INACTIVE;
+    row->count = 0;
+    row->timestamp = 0;
+    row->src_ip = ip_header->saddr;
+    row->dst_ip = ip_header->daddr;
+    switch (skb->protocol)
+    {
+    case IPPROTO_TCP:
+        tcp_header = (struct tcphdr *)skb_transport_header(skb);
+        row->src_port = tcp_header->source;
+        row->dst_port = tcp_header->dest;
+        break;
+    case IPPROTO_UDP:
+        udp_header = (struct udphdr *)skb_transport_header(skb);
+        row->src_port = udp_header->source;
+        row->dst_port = udp_header->dest;
+        break;
+    case IPPROTO_ICMP:
+    default:
+        row->src_port = 0;
+        row->dst_port = 0;
+        break;
+    }
+}
+
+static void
+touch_log_row(log_row_t *row, uint8_t rule_index)
+{
+    struct timespec timespec = {0};
+
+    printk(KERN_INFO "touching the log!...");
+    getnstimeofday(&timespec);
+    row->timestamp = timespec.tv_sec;
+    ++(row->count);
+    row->reason = rule_index;
+}
+
+static bool_t
+does_log_row_match(const log_row_t *row,
+                   const rule_t *rule,
+                   const struct sk_buff *skb)
+{
+    bool_t does_match = FALSE;
+    struct iphdr *ip_header = (struct iphdr *)skb_network_header(skb);
+    uint8_t protocol = ip_header->protocol;
+
+    /* 1. Compare ip address (src+dest) and protocol */
+    if ((row->src_ip != ip_header->saddr) ||
+        (row->dst_ip != ip_header->daddr) ||
+        (row->protocol != protocol))
+    {
+        printk(KERN_INFO "%s: fell for IP/protocol: req %.8x->%.8x %d, got %.8x->%.8x %d\n", __func__,
+                row->src_ip, row->dst_ip, row->protocol,
+                ip_header->saddr, ip_header->daddr, protocol
+                );
+        goto l_cleanup;
+    }
+
+    /* 2. Compare ports */
+    /* 2.1. TCP */
+    if (IPPROTO_TCP == protocol)
+    {
+        struct tcphdr *tcp_header = (struct tcphdr *)skb_transport_header(skb);
+        if ((row->src_port != tcp_header->source) ||
+            (row->dst_port != tcp_header->dest))
+        {
+        printk(KERN_INFO "%s: fell for tcp port\n", __func__);
+            goto l_cleanup;
+        }
+    /* 2.2. UDP */
+    } else if (IPPROTO_UDP == protocol) {
+        struct udphdr *udp_header = (struct udphdr *)skb_transport_header(skb);
+        if ((row->src_port != udp_header->source) ||
+            (row->dst_port != udp_header->dest))
+        {
+        printk(KERN_INFO "%s: fell for udp port\n", __func__);
+            goto l_cleanup;
+        }
+    /* 2.3. ICMP */
+    } else if (IPPROTO_ICMP == protocol) {
+        /* Nothing to check */
+    /* 2.4. Unkwnown protocol */
+    } else {
+        printk(KERN_INFO "%s: fell for unknown protocol\n", __func__);
+        goto l_cleanup;
+    }
+
+    does_match = TRUE;
+l_cleanup:
+
+    return does_match;
+}
+
+static log_row_t *
+search_log_entry(const rule_t *rule,
+                 uint8_t rule_index,
+                 const struct sk_buff *skb)
+{
+    log_row_t *row = NULL;
+    struct klist_iter list_iter = {0};
+    logs_chunk_t *current_entry = NULL;
+    uint8_t i = 0;
+    /* struct iphdr *ip_header = (struct iphdr *)skb_network_header(skb); */
+    /* struct tcphdr *tcp_header = (struct tcphdr *)skb_transport_header(skb); */
+
+    klist_iter_init(&g_log, &list_iter);
+
+    /* if (IPPROTO_TCP == ip_header->protocol || IPPROTO_UDP == ip_header->protocol) { */
+    /* printk(KERN_INFO "%s\tenter for src0x%.8x:%lu dst0x%.8x:%lu prot %d entry %d\n", */
+    /*        __func__, */
+    /*        ip_header->saddr, */
+    /*        (unsigned long)tcp_header->source, */
+    /*        ip_header->daddr, */
+    /*        (unsigned long)tcp_header->dest, */
+    /*        ip_header->protocol, */
+    /*        rule_index */
+    /*        ); */
+    /* } else if (IPPROTO_ICMP == ip_header->protocol) { */
+    /*     printk(KERN_INFO "%s\tenter for src0x%.8x dst0x%.8x prot ICMP entry %d\n", */
+    /*             __func__, */
+    /*             ip_header->saddr, */
+    /*             ip_header->daddr, */
+    /*             rule_index */
+    /*           ); */
+    /* } */
+    while (TRUE) {
+        /* 1. Get next chunk  */
+        current_entry = (logs_chunk_t *)klist_next(&list_iter); 
+        /* 2. Last chunk? break */
+        if (NULL == current_entry) {
+            break;
+        }
+
+        /* 3. Iterate rows in chunk */
+        for (i = 0 ; i < current_entry->write_index ; ++i) {
+            log_row_t *current_row = &current_entry->rows[i];
+            /* 3.1. Check if row matches the rule */
+            if (does_log_row_match(current_row, rule, skb)) {
+                row = current_row;
+                break;
+            }
+        }
+    }
+
+    klist_iter_exit(&list_iter);
+
+    return row;
+}
+
 result_t
-FW_LOG_log(const log_row_t *log)
+FW_LOG_log_match(const rule_t *rule,
+                 uint8_t rule_index,
+                 const struct sk_buff *skb)
 {
     result_t result = E__UNKNOWN;
     log_row_t *dest_row = NULL;
 
-    /* 1. Make sure we have a free slot at the logs chunk tail */
-    result = allocate_new_chunk_if_required();
-    if (E__SUCCESS != result) {
-        goto l_cleanup;
+    /* 1. Get the row for this log */
+    dest_row = search_log_entry(rule, rule_index, skb);
+    if (NULL == dest_row) {
+        printk(KERN_INFO "Creating entry for log...");
+        /* 1. Get a poiner to the matching log_row_t */
+        /* 1.1. Make sure we have a free slot at the logs chunk tail */
+        result = allocate_new_chunk_if_required();
+        if (E__SUCCESS != result) {
+            goto l_cleanup;
+        }
+
+        /* 1.2. Choose the last row */
+        dest_row = &(g_log_tail->rows[g_log_tail->write_index]);
+
+        /* 1.3. Initialize the log row */
+        init_log_row(rule, rule_index, skb, dest_row);
     }
 
-    /* 2. Perform the copy */
-    dest_row = &(g_log_tail->rows[g_log_tail->write_index]);
-    (void)memcpy(dest_row, log, sizeof(*log));
+    /* 2. Touch the row - increase the counter, and update the timestamp */
+    touch_log_row(dest_row, rule_index);
 
     /* 3. Increate logs count */
     ++(g_log_tail->write_index);

@@ -10,6 +10,7 @@
 #include <linux/skbuff.h>
 
 #include "fw.h"
+#include "fw_log.h"
 #include "common.h"
 
 #include "rule_table.h"
@@ -198,12 +199,19 @@ RULE_TABLE_check(const rule_table_t *table,
     for (i = 0 ; i < table->rules_count ; ++i) {
         const rule_t * current_rule = &table->rules[i];
 
+        /* 2. Check if the rule matches the packet  Go over the rules list */
         if (does_match_rule(current_rule, skb)) {
-            /* Found a match - break */
-            *action_out = current_rule->action;
+            /* 3. Found a match */
+            does_match = TRUE;
             printk(KERN_DEBUG "FOUND MATCHING RULE \"%s\": action %d\n", current_rule->rule_name, current_rule->action);
 
-            does_match = TRUE;
+            /* 3.1. Log the match */
+            (void)FW_LOG_log_match(current_rule, i, skb);
+
+            /* 3.2. Return the action */
+            *action_out = current_rule->action;
+
+            /* 3.3. Finish the iteration over the rules list */
             break;
         }
     }
@@ -282,31 +290,6 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
         goto l_cleanup;
     }
 
-    /* [> 3. Match protocol <] */
-    /* switch (rule->protocol) */
-    /* { */
-    /* case PROT_ICMP: */
-    /* case PROT_TCP: */
-    /* case PROT_UDP: */
-    /*     if (rule->protocol != ip_header->protocol) { */
-    /*         goto l_cleanup; */
-    /*     } */
-    /*     break; */
-    /* case PROT_OTHER: */
-    /*     switch (ip_header->protocol) */
-    /*     { */
-    /*         case PROT_ICMP: */
-    /*         case PROT_TCP: */
-    /*         case PROT_UDP: */
-    /*             goto l_cleanup; */
-    /*         default: */
-    /*             break; */
-    /*     } */
-    /*     break; */
-    /* deefault: */
-    /*     break; */
-    /* } */
-
     /* 4. TCP specific */
     if (IPPROTO_TCP == ip_header->protocol) {
         struct tcphdr *tcp_header = (struct tcphdr *)skb_transport_header(skb);
@@ -355,8 +338,6 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
     } /* Note: Nothing ICMP specific */
 
 
-    /* Note: this seems like the most complex test, and I assume most of the
-     *       packets will fall on previous tests - so I left it to be last */
     /* 7. Match direction */
     direction = get_packet_direction(skb);
     /* Note: We will get no common bits for DIRECTION_UNKNOWN, or if the rule

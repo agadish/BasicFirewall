@@ -37,9 +37,9 @@ FW_LOG_shutdown(void);
 /**
  * @brief Destroy a rule table
  * 
- * @param[in] Table to set the data to 
- * @param[in] Data to set
- * @param[in] Length of data to set
+ * @param[in] rule The rule that caused the match
+ * @param[in] rule_index The index of the rule within the table
+ * @param[in] skb The packet that caused the match
  *
  * @return TRUE if was set succesfully, FALSE otherwise (probably due to
  *         invalid data)
@@ -48,7 +48,9 @@ FW_LOG_shutdown(void);
  *         will reset the data, discarding the previous rules if existed.
  */
 result_t
-FW_LOG_log(const log_row_t *log);
+FW_LOG_log_match(const rule_t *rule,
+                 uint8_t rule_index,
+                 const struct sk_buff *skb);
 
 
 /**
