@@ -128,7 +128,7 @@ int main(int argc, const char *argv[])
 
     /* 1. Arguments check */
     if (2 > argc) {
-        (void)fprintf(stderr, "Usage: %s (show_rules|load_rules <path-to-rules-file>|show_log|clear_log)", argv[0]);
+        (void)fprintf(stderr, "Usage: %s (show_rules|load_rules <path-to-rules-file>|show_log|clear_log)\n", argv[0]);
         result = 1;
         goto l_cleanup;
     }
