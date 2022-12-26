@@ -26,6 +26,8 @@
 #include "rule_table.h"
 
 /*   M A C R O S   */
+#define PORT_1023 (1023)
+#define PORT_MORE_THAN_1023 (1024)
 
 
 /*   F U N C T I O N S    D E C L A R A T I O N S   */
@@ -71,8 +73,10 @@ FORMAT_port_to_str(char *buffer,
     uint16_t port = 0;
     
     port = ntohs(port_big_endian);
-    if (MAX_USER_PORT < port) {
+    if (0 == port) {
         strncpy(buffer, "any", buffer_length);
+    } else if (PORT_MORE_THAN_1023 == port) {
+        strncpy(buffer, ">1023", buffer_length);
     } else {
         snprintf(buffer, buffer_length, "%d", (int)port);
     }
@@ -342,24 +346,22 @@ FORMAT_port_to_bin(char *port_str,
     long result_atol = 0;
     uint16_t port = 0;
 
-    /* 1. Check if is "any" */
     if (0 == strcmp(port_str, "any")) {
+        /* 1. Check if is "any" */
         port = 0;
+    } else if (0 == strcmp(port_str, ">1023")) {
+        /* 2. Check if is ">1023" */
+        port = PORT_MORE_THAN_1023;
+    } else {
+        /* 3. Handle numeric value - verify it's correct */
+        result_atol = atol(port_str);
+        if (PORT_1023 < result_atol) {
+            (void)fprintf(stderr, "ERROR: Human rules file contains port >1023. Must be written as \">1023\".\n");
+            result = E__HUMAN_RULES_INVALID_PORT;
+            goto l_cleanup;
+        }
+        port = (uint16_t)result_atol;
     }
-
-    /* 2. Check if is ">1023" */
-    if (0 == strcmp(port_str, ">1023")) {
-        port = 1023;
-    }
-
-    /* 3. Handle numeric value - verify it's correct */
-    result_atol = atol(port_str);
-    if (1023 <= result_atol) {
-        (void)fprintf(stderr, "ERROR: Human rules file contains port >=1023. Must be\">1023\".\n");
-        result = E__HUMAN_RULES_INVALID_PORT;
-        goto l_cleanup;
-    }
-    port = (uint16_t)result_atol;
 
     *port_out = htons(port);
     result = E__SUCCESS;
@@ -368,31 +370,31 @@ l_cleanup:
     return result;
 }
 
-const char *
+    const char *
 FORMAT_direction_to_str(direction_t direction)
 {
     const char *result = NULL;
 
     switch(direction)
     {
-    case DIRECTION_IN:
-        result = "in";
-        break;
-    case DIRECTION_OUT:
-        result = "out";
-        break;
-    case DIRECTION_ANY:
-        result = "any";
-        break;
-    default:
-        result = "invalid";
-        break;
+        case DIRECTION_IN:
+            result = "in";
+            break;
+        case DIRECTION_OUT:
+            result = "out";
+            break;
+        case DIRECTION_ANY:
+            result = "any";
+            break;
+        default:
+            result = "invalid";
+            break;
     }
 
     return result;
 }
 
-void
+    void
 FORMAT_get_date_string(char *date, size_t buffer_length)
 {
     time_t now = 0;
@@ -409,21 +411,21 @@ FORMAT_get_date_string(char *date, size_t buffer_length)
 }
 
 
-void
+    void
 FORMAT_ip_to_str(char *buffer,
-                 size_t buffer_length,
-                 uint32_t ip_big_endian)
+        size_t buffer_length,
+        uint32_t ip_big_endian)
 {
     char ip_address[IP_ADDRESS_MAX] = {0};
     struct sockaddr_in sa = {0};
     const char * result_inet_ntop = NULL;
-    
+
     /* 1. Convert IP address to string */
     sa.sin_addr.s_addr = ip_big_endian;
     result_inet_ntop = inet_ntop(AF_INET,
-                                 &(sa.sin_addr),
-                                 ip_address,
-                                 INET_ADDRSTRLEN);
+            &(sa.sin_addr),
+            ip_address,
+            INET_ADDRSTRLEN);
     /* printf("0x%.8x -> \"%s\"\n", ip_big_endian, ip_address); */
     /* 2. Copy IP to buffer */
     if (NULL == result_inet_ntop) {
