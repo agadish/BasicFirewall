@@ -311,7 +311,7 @@ hw3secws_hookfn_forward(
             action = NF_DROP;
             reason = REASON_NO_MATCHING_RULE;
         } else {
-            printk(KERN_INFO "has match reason=%d action=%d\n", reason, action);
+            /* printk(KERN_INFO "%s: has match reason=%d action=%d\n", __func__, reason, action); */
         }
     }
 

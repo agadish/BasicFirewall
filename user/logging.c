@@ -25,7 +25,7 @@
 #include "logging.h"
 
 /*   M A C R O S   */
-#define LOG_BUFFER_COUNT (4096)
+#define LOG_BUFFER_COUNT (4)
 #define LOGS_CLEAR_CMD_CHAR ('0')
 
 
@@ -110,6 +110,7 @@ LOGGING_print_logs(const char *read_logs_path)
         read_result = read(fd,
                            &logs_buffer[remaining_bytes],
                            sizeof(logs_buffer) - remaining_bytes);
+        /* printf("%s: read(fd, buf, %d(=%d-%d)\n", __func__, sizeof(logs_buffer)-remaining_bytes, sizeof(logs_buffer), remaining_bytes); */
         if ((0 >= read_result) && (0 != errno)) {
             perror("read error");
             result = E__READ_ERROR;

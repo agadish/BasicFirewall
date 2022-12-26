@@ -439,12 +439,13 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
     }
 
     /* 4. TCP specific */
+    /* printk(KERN_INFO "%s: matching protocol %d...\n", __func__, ip_header->protocol); */
     if (IPPROTO_TCP == ip_header->protocol) {
         struct tcphdr *tcp_header = (struct tcphdr *)skb_transport_header(skb);
         /* 4.1. Match src port */
         if ((0 != rule->src_port) &&
-            (rule->src_port != tcp_header->source) &&
-            ((PORT_MORE_THAN_1023_N == rule->src_port) && ntohs(tcp_header->source) <= PORT_1023))
+            (!((PORT_MORE_THAN_1023_N == rule->src_port) && ntohs(tcp_header->source) > PORT_1023)) &&
+            (rule->src_port != tcp_header->source))
         {
 
             goto l_cleanup;
@@ -452,8 +453,8 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
 
         /* 4.2. Match dst port */
         if ((0 != rule->dst_port) &&
-            (rule->dst_port != tcp_header->dest) &&
-            ((PORT_MORE_THAN_1023_N == rule->dst_port) && ntohs(tcp_header->dest) <= PORT_1023))
+            (!((PORT_MORE_THAN_1023_N == rule->dst_port) && ntohs(tcp_header->dest) > PORT_1023)) &&
+            (rule->dst_port != tcp_header->dest))
         {
 
             goto l_cleanup;
