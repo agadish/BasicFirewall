@@ -29,6 +29,38 @@
 #define PORT_1023 (1023)
 #define PORT_MORE_THAN_1023 (1024)
 
+enum tcp_states_e {
+    TCP_ESTABLISHED = 1,
+    TCP_SYN_SENT,
+    TCP_SYN_RECV,
+    TCP_FIN_WAIT1,
+    TCP_FIN_WAIT2,
+    TCP_TIME_WAIT,
+    TCP_CLOSE,
+    TCP_CLOSE_WAIT,
+    TCP_LAST_ACK,
+    TCP_LISTEN,
+    TCP_CLOSING,    /* Now a valid state */
+    TCP_NEW_SYN_RECV,
+
+    TCP_MAX_STATES  /* Leave at the end! */
+};
+
+const char * TCP_STATES_NAMES[] = {
+    "ESTABLISHED",
+    "SYN_SENT",
+    "SYN_RECV",
+    "FIN_WAIT1",
+    "FIN_WAIT2",
+    "TIME_WAIT",
+    "CLOSE",
+    "CLOSE_WAIT",
+    "LAST_ACK",
+    "LISTEN",
+    "CLOSING",
+    "NEW_SYN_RECV",
+};
+
 
 /*   F U N C T I O N S    D E C L A R A T I O N S   */
 
@@ -411,7 +443,7 @@ FORMAT_get_date_string(char *date, size_t buffer_length)
 }
 
 
-    void
+void
 FORMAT_ip_to_str(char *buffer,
         size_t buffer_length,
         uint32_t ip_big_endian)
@@ -434,4 +466,16 @@ FORMAT_ip_to_str(char *buffer,
     } else {
         strncpy(buffer, ip_address, buffer_length);
     }
+}
+
+void
+FORMAT_state_to_str(char *buffer,
+                    size_t buffer_length,
+                    uint8_t state)
+{
+	if ((TCP_ESTABLISHED <= state) && (TCP_MAX_STATES > state)) {
+		(void)strncpy(buffer, TCP_STATES_NAMES[state - TCP_ESTABLISHED], buffer_length);
+	} else {
+		strncpy(buffer, "UNKNOWN_STATE", buffer_length);
+	}
 }

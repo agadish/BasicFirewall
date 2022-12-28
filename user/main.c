@@ -14,6 +14,7 @@
 #include "fw_user.h"
 #include "rule_table.h"
 #include "logging.h"
+#include "connection_table.h"
 
 
 /*   M A C R O S   */
@@ -21,6 +22,7 @@
 #define LOAD_RULES_STR "load_rules"
 #define SHOW_LOG_STR "show_log"
 #define CLEAR_LOG_STR "clear_log"
+#define SHOW_CONNS_STR "show_conns"
 #define LOGS_CLEAR_PATH "/sys/class/fw/log/reset"
 #define LOGS_PRINT_PATH "/dev/fw_log"
 
@@ -30,6 +32,7 @@ static result_t show_rules(void);
 static result_t load_rules(const char *rule_path);
 static result_t show_log(void);
 static result_t clear_log(void);
+static result_t show_conns(void);
 
 
 /*   F U N C T I O N S    I M P L E M E N T A T I O N S   */
@@ -55,6 +58,12 @@ show_rules(void)
 l_cleanup:
 
     return result;
+}
+
+static result_t
+show_conns(void)
+{
+	return CONNECTION_TABLE_print_table(CONNS_FILE_PATH);
 }
 
 static result_t
@@ -128,7 +137,7 @@ int main(int argc, const char *argv[])
 
     /* 1. Arguments check */
     if (2 > argc) {
-        (void)fprintf(stderr, "Usage: %s (show_rules|load_rules <path-to-rules-file>|show_log|clear_log)\n", argv[0]);
+        (void)fprintf(stderr, "Usage: %s (show_rules|load_rules <path-to-rules-file>|show_log|clear_log|show_conns)\n", argv[0]);
         result = 1;
         goto l_cleanup;
     }
@@ -145,6 +154,8 @@ int main(int argc, const char *argv[])
         result = show_log();
     } else if (0 == strcmp(CLEAR_LOG_STR, argv[1])) {
         result = clear_log();
+    } else if (0 == strcmp(SHOW_CONNS_STR, argv[1])) {
+        result = show_conns();
     }
     if (E__SUCCESS != result) {
          goto l_cleanup;

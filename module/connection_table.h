@@ -17,18 +17,6 @@
 
 
 /*   T Y P E D E F S   */
-typedef struct connection_id_s {
-    uint32_t src_ip;
-    uint16_t src_port;
-    uint32_t dst_ip;
-    uint16_t dst_port;
-} connection_id_t;
-
-typedef struct connection_table_entry_s {
-    connection_id_t id;
-    uint8_t state;
-} connection_table_entry_t;
-
 typedef struct connection_table_s connection_table_t;
 
 

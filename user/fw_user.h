@@ -105,5 +105,18 @@ typedef struct rule_table_s {
     rule_t rules[MAX_RULES];
 } rule_table_t;
 
+#pragma pack(1)
+typedef struct connection_id_s {
+    uint32_t src_ip;
+    uint16_t src_port;
+    uint32_t dst_ip;
+    uint16_t dst_port;
+} connection_id_t;
+
+#pragma pack(1)
+typedef struct connection_table_entry_s {
+    connection_id_t id;
+    uint8_t state;
+} connection_table_entry_t;
 
 #endif // _FW_USER_H_

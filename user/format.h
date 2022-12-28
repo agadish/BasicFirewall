@@ -26,6 +26,7 @@
 #define GET_IP_MASK(n) ((0 == (n)) ? 0 : (~((1 << (32 - (n))) - 1)))
 #define DATE_STRING_MAX_LENGTH (100)
 #define REASON_STRING_MAX (30)
+#define STATE_STRING_MAX (18)
 
 
 /*   F U N C T I O N S   D E C L A R A T I O N S   */
@@ -76,6 +77,11 @@ FORMAT_direction_to_str(direction_t direction);
 
 void
 FORMAT_get_date_string(char *date, size_t buffer_length);
+
+void
+FORMAT_state_to_str(char *buffer,
+                    size_t buffer_length,
+                    uint8_t state);
 
 void
 FORMAT_ip_to_str(char *buffer,
