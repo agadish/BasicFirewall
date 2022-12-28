@@ -137,6 +137,7 @@ CONNECTION_TABLE_dump_data(const connection_table_t *table,
     /* XXX: Must discard the const, but not modifying it */
     klist_iter_init((struct klist *)&table->list, &list_iter);
 
+    printk(KERN_INFO "%s: enter\n", __func__);
     while (remaining_length > sizeof(node->entry)) {
         /* 1. Get next chunk  */
         node = (connection_table_entry_node_t *)klist_next(&list_iter); 
@@ -145,6 +146,7 @@ CONNECTION_TABLE_dump_data(const connection_table_t *table,
             break;
         }
 
+        printk(KERN_INFO "%s: copying an entry 0x%.8x:0x%.4x -> 0x%.8x->0x%.4x\n", __func__, node->entry.id.src_ip, node->entry.id.src_port, node->entry.id.dst_ip, node->entry.id.dst_port);
         (void)memcpy(&buffer[current_index], &node->entry, sizeof(node->entry));
         current_index += sizeof(node->entry);
         remaining_length -= sizeof(node->entry);
@@ -176,6 +178,7 @@ tcp_machine_state(connection_table_t *table,
         goto l_cleanup;
     }
 
+    printk(KERN_INFO "%s: hello\n", __func__);
     /* 2. Handle TCP state machine */
     switch (entry->state)
     {
@@ -265,7 +268,7 @@ CONNECTION_TABLE_check(connection_table_t *table,
                        __u8 *action_out,
                        reason_t *reason_out)
 {
-    bool_t does_match = FALSE;
+    bool_t was_handled = FALSE;
     bool_t is_legal_traffic = TRUE;
     connection_table_entry_t *entry = NULL;
     connection_table_entry_t *ientry = NULL;
@@ -281,8 +284,10 @@ CONNECTION_TABLE_check(connection_table_t *table,
      *       Unless, a connection exists for this SYN packet, and it will be handled accordingly */
     entry = search_entry(table, skb);
     if (NULL == entry) {
+        printk(KERN_INFO "%s: no entry for 0x%.8x:0x%.4x -> 0x%.8x->0x%.4x\n", __func__, ip_hdr(skb)->saddr, tcp_hdr(skb)->source, ip_hdr(skb)->daddr, tcp_hdr(skb)->dest);
         goto l_cleanup;
     }
+
     ientry = search_inverse_entry(table, entry);
     if (NULL == entry) {
         printk(KERN_WARNING "%s: Found an entry in the connection table without its inverse!" \
@@ -291,6 +296,8 @@ CONNECTION_TABLE_check(connection_table_t *table,
         goto l_cleanup;
     }
 
+    printk(KERN_INFO "%s: entry=0x%.8x, ientry=0x%.8x\n", __func__, (uint32_t)entry, (uint32_t)ientry);
+    was_handled = TRUE;
     is_legal_traffic = tcp_machine_state(table, skb, entry, ientry);
     if (is_legal_traffic) {
         *action_out = NF_ACCEPT;
@@ -303,7 +310,7 @@ CONNECTION_TABLE_check(connection_table_t *table,
 
 l_cleanup:
 
-    return does_match;
+    return was_handled;
 }
 
 result_t
@@ -316,6 +323,7 @@ CONNECTION_TABLE_handle_accepted_syn(connection_table_t *table,
     struct iphdr *ip_header = ip_hdr(skb);
     struct tcphdr *tcp_header = NULL;
 
+    printk(KERN_INFO "%s: hello\n", __func__);
     /* 0. Input validation */
     /* 0.1. NULL validation */
     if ((NULL == table) || (NULL == skb)) {
@@ -408,9 +416,11 @@ search_entry_by_id(const connection_table_t *table, const connection_id_t *id)
     /* XXX: Must discard the const, but not modifying it */
     klist_iter_init((struct klist *)&table->list, &list_iter);
 
+    printk(KERN_INFO "%s: sarching id 0x%8x:0x%.4x -> 0x%.8x:0x%.4x\n", __func__, id->src_ip, id->src_port, id->dst_ip, id->dst_port);
     while (TRUE) {
         /* 1. Get next chunk  */
         node = (connection_table_entry_node_t *)klist_next(&list_iter); 
+        printk(KERN_INFO "%s: node 0x%.8x\n", __func__, (uint32_t)node);
         /* 2. Last chunk? break */
         if (NULL == node) {
             break;
@@ -420,11 +430,13 @@ search_entry_by_id(const connection_table_t *table, const connection_id_t *id)
         if (0 == memcmp(&node->entry.id, id, sizeof(*id))) {
             /* Found */
             result = &node->entry;
+            printk(KERN_INFO "%s: found id 0x%8x:0x%.4x -> 0x%.8x:0x%.4x ! addr= 0x%.8x\n", __func__, id->src_ip, id->src_port, id->dst_ip, id->dst_port, (uint32_t)result);
             break;
         }
     }
 
     klist_iter_exit(&list_iter);
+    printk(KERN_INFO "%s: found 0x%.8x\n", __func__, (uint32_t)result);
 
     return result;
 }
@@ -447,12 +459,22 @@ search_inverse_entry(const connection_table_t *table, const connection_table_ent
     node = container_of(entry, connection_table_entry_node_t, entry);
     klist_iter_init_node((struct klist *)&table->list, &list_iter, &node->node);
     prev_node = (connection_table_entry_node_t *)klist_prev(&list_iter);
+    if (NULL != prev_node) {
+        printk(KERN_INFO "%s: prev exists 0x%.8x:0x%.4x -> 0x%.8x:0x%.4x\n", __func__, prev_node->entry.id.src_ip,prev_node->entry.id.src_port, prev_node->entry.id.dst_ip, prev_node->entry.id.dst_ip);
+    } else {
+        printk(KERN_INFO "%s: prev of 0x%.8x is NULL\n", __func__, (uint32_t)&node->node);
+    }
     next_node = (connection_table_entry_node_t *)klist_next(&list_iter);
     next_node = (connection_table_entry_node_t *)klist_next(&list_iter);
+    if (NULL != next_node) {
+        printk(KERN_INFO "%s: next exists 0x%.8x:0x%.4x -> 0x%.8x:0x%.4x\n", __func__, next_node->entry.id.src_ip,next_node->entry.id.src_port, next_node->entry.id.dst_ip, next_node->entry.id.dst_ip);
+    } else {
+        printk(KERN_INFO "%s: next of 0x%.8x is NULL\n", __func__, (uint32_t)&node->node);
+    }
     klist_iter_exit(&list_iter);
-    if (0 == memcmp(&prev_node->entry.id, &inverse_id, sizeof(inverse_id))) {
+    if ((NULL != prev_node) && (0 == memcmp(&prev_node->entry.id, &inverse_id, sizeof(inverse_id)))) {
         result = &prev_node->entry;
-    } else if (0 == memcmp(&next_node->entry.id, &inverse_id, sizeof(inverse_id))) {
+    } else if ((NULL != next_node) && (0 == memcmp(&next_node->entry.id, &inverse_id, sizeof(inverse_id)))) {
         result = &next_node->entry;
     } else {
         result = search_entry_by_id(table, &inverse_id);
