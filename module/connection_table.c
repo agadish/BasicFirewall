@@ -137,10 +137,11 @@ CONNECTION_TABLE_dump_data(const connection_table_t *table,
     /* XXX: Must discard the const, but not modifying it */
     klist_iter_init((struct klist *)&table->list, &list_iter);
 
-    printk(KERN_INFO "%s: enter\n", __func__);
+    printk(KERN_INFO "%s: enter, buffer size %lu\n", __func__, (unsigned long)remaining_length);
     while (remaining_length > sizeof(node->entry)) {
         /* 1. Get next chunk  */
         node = (connection_table_entry_node_t *)klist_next(&list_iter); 
+        printk(KERN_INFO "%s: node scanned 0x%.8x\n", __func__, (uint32_t)node);
         /* 2. Last chunk? break */
         if (NULL == node) {
             break;
@@ -178,17 +179,20 @@ tcp_machine_state(connection_table_t *table,
         goto l_cleanup;
     }
 
-    printk(KERN_INFO "%s: hello\n", __func__);
+    /* printk(KERN_INFO "%s: hello\n", __func__); */
     /* 2. Handle TCP state machine */
+    printk(KERN_INFO "%s: state %d\n", __func__, entry->state);
     switch (entry->state)
     {
     case TCP_ESTABLISHED:
         /* SYN is illegal, FIN is legal (and closes), everything else is legal */
         if (tcp_header->fin) {
+            /* printk(KERN_INFO "%s: state %d got fin\n", __func__, entry->state); */
             entry->state = TCP_FIN_WAIT1;
             ientry->state = TCP_CLOSE_WAIT;
         } else if (tcp_header->syn) {
             /* Detect invalid traffic */
+            printk(KERN_INFO "%s: state %d illegal traffic with syn\n", __func__, entry->state);
             is_legal_traffic = FALSE;
             goto l_cleanup;
         } else {
@@ -198,9 +202,11 @@ tcp_machine_state(connection_table_t *table,
     case TCP_SYN_SENT:
         /* Allowed only ACK */
         if (tcp_header->fin || (!tcp_header->ack)) {
+            printk(KERN_INFO "%s: state %d illegal traffic with FIN-ACK\n", __func__, entry->state);
             is_legal_traffic = FALSE;
             goto l_cleanup;
         } else if (tcp_header->ack) {
+            /* printk(KERN_INFO "%s: state %d got ack\n", __func__, entry->state); */
             entry->state = TCP_ESTABLISHED;
             ientry->state = TCP_ESTABLISHED;
         }
@@ -209,12 +215,15 @@ tcp_machine_state(connection_table_t *table,
         /* Nothing should be sent after SYN+ACK - drop the connection.
          * Note: it might be accepted later and its not our concern */
         if (tcp_header->syn && tcp_header->ack) {
+            /* printk(KERN_INFO "%s: state %d got synack\n", __func__, entry->state); */
             entry->state = TCP_ESTABLISHED;
             ientry->state = TCP_ESTABLISHED;
         } else if (tcp_header->fin) {
+            /* printk(KERN_INFO "%s: state %d got fin\n", __func__, entry->state); */
             entry->state = TCP_CLOSE_WAIT;
             ientry->state = TCP_FIN_WAIT1;
         } else {
+            printk(KERN_INFO "%s: state %d got illegal traffic\n", __func__, entry->state);
             is_legal_traffic = FALSE;
             goto l_cleanup;
         }
@@ -222,34 +231,50 @@ tcp_machine_state(connection_table_t *table,
     case TCP_FIN_WAIT1:
         if (tcp_header->fin) {
             if (tcp_header->ack) {
+                /* printk(KERN_INFO "%s: state %d got finack\n", __func__, entry->state); */
                 entry->state = TCP_TIME_WAIT;
                 ientry->state = TCP_CLOSING;
             } else {
+                /* printk(KERN_INFO "%s: state %d got fin\n", __func__, entry->state); */
                 entry->state = TCP_CLOSING;
                 ientry->state = TCP_TIME_WAIT;
             }
         } else if (tcp_header->ack) {
+            /* printk(KERN_INFO "%s: state %d got ack\n", __func__, entry->state); */
             entry->state = TCP_FIN_WAIT2;
             ientry->state = TCP_CLOSE_WAIT;
         }
         break;
     case TCP_FIN_WAIT2:
         if (tcp_header->fin) {
+            /* printk(KERN_INFO "%s: state %d got fin\n", __func__, entry->state); */
             entry->state = TCP_TIME_WAIT;
             ientry->state = TCP_CLOSING;
         }
         break;
     case TCP_CLOSING:
         if (tcp_header->ack) {
+            /* printk(KERN_INFO "%s: state %d got ack\n", __func__, entry->state); */
             entry->state = TCP_TIME_WAIT;
             ientry->state = TCP_FIN_WAIT2;
         }
         break;
-    case TCP_CLOSE_WAIT:
     case TCP_LAST_ACK:
     case TCP_TIME_WAIT:
+        /* printk(KERN_INFO "%s: state %d discarding\n", __func__, entry->state); */
         discard_connection(table, entry, ientry);
         break;
+    case TCP_CLOSE_WAIT:
+        if (tcp_header->ack) {
+            /* printk(KERN_INFO "%s: state %d got ack\n", __func__, entry->state); */
+            entry->state = TCP_LAST_ACK;
+            ientry->state = TCP_TIME_WAIT;
+        }
+        break;
+    default:
+        printk(KERN_INFO "%s: state %d UNKNOWN! discarding\n", __func__, entry->state);
+        is_legal_traffic = FALSE;
+        goto l_cleanup;
     }
 
     /* 3. If traffic was illegal - immediately drop it */
@@ -323,7 +348,6 @@ CONNECTION_TABLE_handle_accepted_syn(connection_table_t *table,
     struct iphdr *ip_header = ip_hdr(skb);
     struct tcphdr *tcp_header = NULL;
 
-    printk(KERN_INFO "%s: hello\n", __func__);
     /* 0. Input validation */
     /* 0.1. NULL validation */
     if ((NULL == table) || (NULL == skb)) {
@@ -374,6 +398,7 @@ CONNECTION_TABLE_handle_accepted_syn(connection_table_t *table,
     /* 3. Add entries */
     klist_add_tail(&original_entry_node->node, &table->list);
     klist_add_tail(&inverse_entry_node->node, &table->list);
+    printk(KERN_INFO "%s: added entry+reverse entry\n", __func__);
 
     /* Success */
     result = E__SUCCESS;
@@ -416,11 +441,11 @@ search_entry_by_id(const connection_table_t *table, const connection_id_t *id)
     /* XXX: Must discard the const, but not modifying it */
     klist_iter_init((struct klist *)&table->list, &list_iter);
 
-    printk(KERN_INFO "%s: sarching id 0x%8x:0x%.4x -> 0x%.8x:0x%.4x\n", __func__, id->src_ip, id->src_port, id->dst_ip, id->dst_port);
+    printk(KERN_INFO "%s: searching id 0x%.8x:0x%.4x -> 0x%.8x:0x%.4x\n", __func__, id->src_ip, id->src_port, id->dst_ip, id->dst_port);
     while (TRUE) {
         /* 1. Get next chunk  */
         node = (connection_table_entry_node_t *)klist_next(&list_iter); 
-        printk(KERN_INFO "%s: node 0x%.8x\n", __func__, (uint32_t)node);
+        /* printk(KERN_INFO "%s: node 0x%.8x\n", __func__, (uint32_t)node); */
         /* 2. Last chunk? break */
         if (NULL == node) {
             break;
@@ -430,7 +455,7 @@ search_entry_by_id(const connection_table_t *table, const connection_id_t *id)
         if (0 == memcmp(&node->entry.id, id, sizeof(*id))) {
             /* Found */
             result = &node->entry;
-            printk(KERN_INFO "%s: found id 0x%8x:0x%.4x -> 0x%.8x:0x%.4x ! addr= 0x%.8x\n", __func__, id->src_ip, id->src_port, id->dst_ip, id->dst_port, (uint32_t)result);
+            /* printk(KERN_INFO "%s: found id 0x%8x:0x%.4x -> 0x%.8x:0x%.4x ! addr= 0x%.8x\n", __func__, id->src_ip, id->src_port, id->dst_ip, id->dst_port, (uint32_t)result); */
             break;
         }
     }
@@ -460,7 +485,7 @@ search_inverse_entry(const connection_table_t *table, const connection_table_ent
     klist_iter_init_node((struct klist *)&table->list, &list_iter, &node->node);
     prev_node = (connection_table_entry_node_t *)klist_prev(&list_iter);
     if (NULL != prev_node) {
-        printk(KERN_INFO "%s: prev exists 0x%.8x:0x%.4x -> 0x%.8x:0x%.4x\n", __func__, prev_node->entry.id.src_ip,prev_node->entry.id.src_port, prev_node->entry.id.dst_ip, prev_node->entry.id.dst_ip);
+        printk(KERN_INFO "%s: prev exists 0x%.8x:0x%.4x -> 0x%.8x:0x%.4x\n", __func__, prev_node->entry.id.src_ip,prev_node->entry.id.src_port, prev_node->entry.id.dst_ip, prev_node->entry.id.dst_port);
     } else {
         printk(KERN_INFO "%s: prev of 0x%.8x is NULL\n", __func__, (uint32_t)&node->node);
     }
@@ -473,8 +498,10 @@ search_inverse_entry(const connection_table_t *table, const connection_table_ent
     }
     klist_iter_exit(&list_iter);
     if ((NULL != prev_node) && (0 == memcmp(&prev_node->entry.id, &inverse_id, sizeof(inverse_id)))) {
+        printk(KERN_INFO "%s: found as prev node!\n", __func__);
         result = &prev_node->entry;
     } else if ((NULL != next_node) && (0 == memcmp(&next_node->entry.id, &inverse_id, sizeof(inverse_id)))) {
+        printk(KERN_INFO "%s: found as next node!\n", __func__);
         result = &next_node->entry;
     } else {
         result = search_entry_by_id(table, &inverse_id);
@@ -497,4 +524,5 @@ discard_connection(connection_table_t *table,
     KFREE_SAFE(entry_node);
     klist_del(&ientry_node->node);
     KFREE_SAFE(ientry_node);
+    printk(KERN_INFO "%s: discarded entry and ientry\n", __func__);
 }
