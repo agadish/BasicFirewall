@@ -381,7 +381,7 @@ hw4secws_hookfn_local_out(
             /* Ignore failure */
             (void)CONNECTION_TABLE_track_local_out(g_connection_table, skb);
         } else {
-            printk(KERN_ERR "%s: outgoing packet witout SYN nor connection table entry!\n", __func__);
+            printk(KERN_ERR "%s: outgoing packet without SYN nor connection table entry! syn%d ack%d fin%d rst%d\n", __func__, tcp_hdr(skb)->syn, tcp_hdr(skb)->ack, tcp_hdr(skb)->fin, tcp_hdr(skb)->rst);
             action = NF_DROP;
         }
     }
@@ -424,7 +424,7 @@ hw4secws_hookfn_pre_routing(
             printk(KERN_INFO "%s: has a conn match!\n", __func__);
             should_log = FALSE;
         } else {
-            printk(KERN_INFO "%s: has no conns match, will pass to rule table\n", __func__);
+            /* printk(KERN_INFO "%s: has no conns match, will pass to rule table\n", __func__); */
             /* 4. Check the rule table */
             has_rule_match = RULE_TABLE_check(&g_rule_table, skb, &action, &reason);
             if (!has_rule_match) {
@@ -446,6 +446,8 @@ hw4secws_hookfn_pre_routing(
                         printk(KERN_INFO "%s: has a conn match second time!\n", __func__);
                         should_log = FALSE;
                     }
+                } else {
+                    printk(KERN_ERR "%s: outgoing packet without SYN nor connection table entry! syn%d ack%d fin%d rst%d\n", __func__, tcp_hdr(skb)->syn, tcp_hdr(skb)->ack, tcp_hdr(skb)->fin, tcp_hdr(skb)->rst);
                 }
             }
         }

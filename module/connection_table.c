@@ -296,12 +296,14 @@ tcp_machine_state(connection_table_t *table,
     {
     case TCP_CLOSE:
         if (tcp_header->syn) {
+            printk(KERN_INFO "%s: state CLOSE got syn!\n", __func__);
             conn->state = TCP_SYN_SENT;
             iconn->state = TCP_SYN_RECV;
         } else {
             is_legal_traffic = FALSE;
             goto l_cleanup;
         }
+        break;
     case TCP_ESTABLISHED:
         /* SYN is illegal, FIN is legal (and closes), everything else is legal */
         if (tcp_header->fin) {
@@ -425,7 +427,7 @@ CONNECTION_TABLE_track_local_out(connection_table_t *table,
      *       Unless, a connection exists for this SYN packet, and it will be handled accordingly */
     entry = search_entry(table, skb);
     if (NULL == entry) {
-        printk(KERN_INFO "%s: no entry for 0x%.8x:0x%.4x -> 0x%.8x->0x%.4x\n", __func__, ip_hdr(skb)->saddr, tcp_hdr(skb)->source, ip_hdr(skb)->daddr, tcp_hdr(skb)->dest);
+        /* printk(KERN_INFO "%s: no entry for 0x%.8x:0x%.4x -> 0x%.8x->0x%.4x\n", __func__, ip_hdr(skb)->saddr, tcp_hdr(skb)->source, ip_hdr(skb)->daddr, tcp_hdr(skb)->dest); */
         goto l_cleanup;
     }
 
@@ -501,7 +503,7 @@ CONNECTION_TABLE_check(connection_table_t *table,
         *reason_out = REASON_ILLEGAL_VALUE;
     }
 
-    if (NULL != entry) {
+    if (NULL != entry->handler) {
         entry->handler(&entry->conn, &ientry->conn, skb);
     }
 
@@ -656,7 +658,7 @@ CONNECTION_TABLE_handle_accepted_syn(connection_table_t *table,
         case FTP_PORT_N:
             is_proxy = TRUE;
             init_fn = (entry_init_f)proxy_entry_init;
-            allocation_size = sizeof(proxy_connection_t);
+            allocation_size = sizeof(proxy_connection_table_entry_t);
             break;
         default:
             init_fn = entry_init;
@@ -681,6 +683,7 @@ CONNECTION_TABLE_handle_accepted_syn(connection_table_t *table,
 
     if (is_proxy) {
         proxy_connection_t *original_pconn = &((proxy_connection_table_entry_t *)original_entry_node)->conn;
+
         switch (tcp_header->dest)
         {
             case HTTP_PORT_N:
@@ -698,6 +701,7 @@ CONNECTION_TABLE_handle_accepted_syn(connection_table_t *table,
     /* 3. Add entries */
     klist_add_tail(&original_entry_node->node, &table->list);
     klist_add_tail(&inverse_entry_node->node, &table->list);
+
     printk(KERN_INFO "%s: added entry+reverse entry\n", __func__);
 
     /* Success */
@@ -836,7 +840,7 @@ search_entry_by_id(const connection_table_t *table, const connection_id_t *id)
     /* XXX: Must discard the const, but not modifying it */
     klist_iter_init((struct klist *)&table->list, &list_iter);
 
-    printk(KERN_INFO "%s: searching id 0x%.8x:0x%.4x -> 0x%.8x:0x%.4x\n", __func__, id->src_ip, id->src_port, id->dst_ip, id->dst_port);
+    /* printk(KERN_INFO "%s: searching id 0x%.8x:0x%.4x -> 0x%.8x:0x%.4x\n", __func__, id->src_ip, id->src_port, id->dst_ip, id->dst_port); */
     while (TRUE) {
         /* 1. Get next chunk  */
         node = (connection_table_entry_t *)klist_next(&list_iter); 
@@ -856,7 +860,7 @@ search_entry_by_id(const connection_table_t *table, const connection_id_t *id)
     }
 
     klist_iter_exit(&list_iter);
-    printk(KERN_INFO "%s: found 0x%.8x\n", __func__, (uint32_t)result);
+    /* printk(KERN_INFO "%s: found 0x%.8x\n", __func__, (uint32_t)result); */
 
     return result;
 }
