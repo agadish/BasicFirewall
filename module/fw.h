@@ -114,10 +114,16 @@ typedef struct connection_id_s {
 } connection_id_t;
 
 #pragma pack(1)
-typedef struct connection_table_entry_s {
+typedef struct connection_s {
     connection_id_t id;
     __u8 state;
-} connection_table_entry_t;
+} connection_t;
+
+#pragma pack(1)
+typedef struct proxy_connection_s {
+    connection_t base;
+    __u16 proxy_port;
+} proxy_connection_t;
 
 
 #endif // _FW_H_

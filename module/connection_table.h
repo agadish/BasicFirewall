@@ -74,8 +74,15 @@ CONNECTION_TABLE_check(connection_table_t *table,
                        reason_t *reason_out);
 
 result_t
+CONNECTION_TABLE_assign_proxy(connection_table_t *table,
+                              proxy_connection_t *proxy_conn);
+
+result_t
 CONNECTION_TABLE_handle_accepted_syn(connection_table_t *table,
                                      const struct sk_buff *skb);
+bool_t
+CONNECTION_TABLE_track_local_out(connection_table_t *table,
+                                 const struct sk_buff *skb);
 
 
 #endif /* __CONNECTION_TABLE_H__ */

@@ -55,3 +55,4 @@ dkms.conf
 *.txt
 main
 tags
+__pycache__

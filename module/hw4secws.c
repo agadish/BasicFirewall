@@ -65,7 +65,7 @@ __exit hw4secws_exit(void);
 /* log_drop(void); */
 
 /**
- * @brief The netfilter hook of the driver on FORWARD chain
+ * @brief The netfilter hook of the driver on PRE_ROUTING chain
  * 
  * @param[in] priv Ignored
  * @param[in] skb The packet's socket buffer (ignored)
@@ -74,7 +74,23 @@ __exit hw4secws_exit(void);
  * @return NF_ACCEPT
  */
 static unsigned int
-hw4secws_hookfn_forward(
+hw4secws_hookfn_pre_routing(
+    void *priv,
+    struct sk_buff *skb,
+    const struct nf_hook_state *state
+);
+
+/**
+ * @brief The netfilter hook of the driver on LOCAL_OUT chain
+ * 
+ * @param[in] priv Ignored
+ * @param[in] skb The packet's socket buffer (ignored)
+ * @param[in] state The packet's netfilter hook state (ignored)
+ *
+ * @return NF_ACCEPT
+ */
+static unsigned int
+hw4secws_hookfn_local_out(
     void *priv,
     struct sk_buff *skb,
     const struct nf_hook_state *state
@@ -137,7 +153,7 @@ static void
 clean_conns_driver(void);
 
 /**
- * @brief Register the firewall's hooks, aka the FORWARD hook
+ * @brief Register the firewall's hooks
  *
  * @return 0 on success, non-zero on error
  */
@@ -176,6 +192,20 @@ rules_display(struct device *dev, struct device_attribute *attr, char *buf);
  */
 static ssize_t
 conns_display(struct device *dev, struct device_attribute *attr, char *buf);
+
+/**
+ * @brief Handles a write request that creates a new proxy rule
+ *
+ * @param[in] dev Ignored
+ * @param[in] attr Ignored
+ * @param[in] buf The buffer that holds the new rules
+ * @param[in] count Length of buf
+ *
+ * @return Number of bytes were read, or negative value on error
+ */
+static ssize_t
+proxy_conns_assign(struct device *dev, struct device_attribute *attr, const char *buf, size_t count);
+
 
 /**
  * @brief Handles a write request that modifies the rules
@@ -246,10 +276,15 @@ fw_log_release(struct inode *fw_log_inode, struct file *fw_log_file);
 
 /*   G L O B A L S   */
 /** 
- * @brief Netfilter hook for FORWARD packet chain, aka packets that are neither destinated to this
+ * @brief Netfilter hook for PRE_ROUTING packet chain,
+ */
+static struct nf_hook_ops g_pre_routing_hook;
+
+/** 
+ * @brief Netfilter hook for LOCAL_OUT packet chain,
  *        machine nor sent by this machine
  */
-static struct nf_hook_ops g_forward_hook;
+static struct nf_hook_ops g_local_out_hook;
 
 /** 
  * @brief Character device of the module
@@ -276,6 +311,7 @@ static struct class *g_hw4secws_class = NULL;
 static struct device *g_sysfs_log_device = NULL;
 static struct device *g_sysfs_rules_device = NULL;
 static struct device *g_sysfs_conns_device = NULL;
+static struct device *g_sysfs_proxy_conns_device = NULL;
 static bool_t g_has_sysfs_rules_device = FALSE;
 static bool_t g_has_sysfs_log_device = FALSE;
 static bool_t g_has_sysfs_conns_device = FALSE;
@@ -293,6 +329,8 @@ static DEVICE_ATTR(rules, S_IWUSR | S_IRUGO, rules_display, rules_modify);
 static DEVICE_ATTR(reset, S_IWUSR, NULL, log_modify); 
 /* connecion table file */
 static DEVICE_ATTR(conns, S_IRUGO, conns_display, NULL); 
+/* proxy connecion table file */
+static DEVICE_ATTR(proxy_conns, S_IWUSR | S_IRUGO, NULL, proxy_conns_assign); 
 
 
 /*   F U N C T I O N S    I M P L E M E N T A T I O N S   */
@@ -322,7 +360,40 @@ fw_log_release(struct inode *fw_log_inode, struct file *fw_log_file)
 }
 
 static unsigned int
-hw4secws_hookfn_forward(
+hw4secws_hookfn_local_out(
+    void *priv,
+    struct sk_buff *skb,
+    const struct nf_hook_state *state
+){
+    __u8 action = NF_ACCEPT;
+    bool_t has_conns_match = FALSE;
+    reason_t reason = REASON_FW_INACTIVE;
+
+    UNUSED_ARG(priv);
+    UNUSED_ARG(state);
+
+    /* Ignore errors */
+    has_conns_match = CONNECTION_TABLE_check(g_connection_table, skb, &action, &reason);
+    if (!has_conns_match) {
+        printk(KERN_INFO "%s: has no conns match, will pass to rule table\n", __func__);
+        /* 4. Check the rule table */
+        if (tcp_hdr(skb)->syn) {
+            /* Ignore failure */
+            (void)CONNECTION_TABLE_track_local_out(g_connection_table, skb);
+        } else {
+            printk(KERN_ERR "%s: outgoing packet witout SYN nor connection table entry!\n", __func__);
+            action = NF_DROP;
+        }
+    }
+
+    goto l_cleanup;
+l_cleanup:
+
+    return (unsigned int)action;
+}
+
+static unsigned int
+hw4secws_hookfn_pre_routing(
     void *priv,
     struct sk_buff *skb,
     const struct nf_hook_state *state
@@ -360,16 +431,25 @@ hw4secws_hookfn_forward(
                 /* 4.1. No match: drop the packet */
                 action = NF_DROP;
                 reason = REASON_NO_MATCHING_RULE;
-            } else {
-                /* 4.2. matching rule - if is SYN, update connection table */
+                goto l_cleanup;
+            }
+            /* Note: If we reach here it must be a TCP syn */
+            /* 5. Matching rule - should bes SYN, update connection table */
+            if (IPPROTO_TCP == ip_hdr(skb)->protocol) {
+                /* For sure it has syn */
                 if (tcp_hdr(skb)->syn) {
                     /* Ignore failure */
                     (void)CONNECTION_TABLE_handle_accepted_syn(g_connection_table, skb);
+                    /* 6. Check the connection table once again - after inserting new rule */
+                    has_conns_match = CONNECTION_TABLE_check(g_connection_table, skb, &action, &reason);
+                    if (has_conns_match) {
+                        printk(KERN_INFO "%s: has a conn match second time!\n", __func__);
+                        should_log = FALSE;
+                    }
                 }
             }
         }
     }
-
 
 l_cleanup:
     /* 3. Log the packet with the action to the reason */
@@ -387,15 +467,29 @@ register_hooks(void)
     int result = 0;
     int result_register_hook = -1;
 
-    /* 1. Register Forward hook */
+    /* 1. Register pre-routing hook */
     /* 1.1. Init struct fields */
-    g_forward_hook.hook = hw4secws_hookfn_forward;
-    g_forward_hook.hooknum = NF_INET_FORWARD;
-    g_forward_hook.pf = PF_INET;
-    g_forward_hook.priority = NF_IP_PRI_FIRST;
+    g_pre_routing_hook.hook = hw4secws_hookfn_pre_routing;
+    g_pre_routing_hook.hooknum = NF_INET_PRE_ROUTING;
+    g_pre_routing_hook.pf = PF_INET;
+    g_pre_routing_hook.priority = NF_IP_PRI_FIRST;
 
     /* 1.2. Register hook */
-    result_register_hook = nf_register_net_hook(&init_net, &g_forward_hook);
+    result_register_hook = nf_register_net_hook(&init_net, &g_pre_routing_hook);
+    if (0 != result_register_hook) {
+        result = result_register_hook;
+        goto l_cleanup;
+    }
+
+    /* 2. Register local-out hook */
+    /* 2.1. Init struct fields */
+    g_local_out_hook.hook = hw4secws_hookfn_local_out;
+    g_local_out_hook.hooknum = NF_INET_LOCAL_OUT;
+    g_local_out_hook.pf = PF_INET;
+    g_local_out_hook.priority = NF_IP_PRI_FIRST;
+
+    /* 2.2. Register hook */
+    result_register_hook = nf_register_net_hook(&init_net, &g_local_out_hook);
     if (0 != result_register_hook) {
         result = result_register_hook;
         goto l_cleanup;
@@ -544,10 +638,21 @@ init_conns_driver(void)
     }
     g_has_sysfs_conns_device = TRUE;
 
-    /* 3. Create sysfs device */
+    /* 3. Create sysfs devices */
+    /* 3.1. Conns - read */
     result_device_create_file = device_create_file(
         g_sysfs_conns_device,
         (const struct device_attribute *)&dev_attr_conns.attr
+    );
+    if (0 != result_device_create_file) {
+        result = -1;
+        goto l_cleanup;
+    }
+
+    /* 3.1. Proxy conns - write */
+    result_device_create_file = device_create_file(
+        g_sysfs_proxy_conns_device,
+        (const struct device_attribute *)&dev_attr_proxy_conns.attr
     );
     if (0 != result_device_create_file) {
         result = -1;
@@ -646,6 +751,12 @@ clean_rules_driver(void)
 static void
 clean_conns_driver(void)
 {
+    if (NULL != g_sysfs_proxy_conns_device) {
+        device_remove_file(g_sysfs_proxy_conns_device,
+                           (const struct device_attribute *)&dev_attr_conns.attr);
+        g_sysfs_proxy_conns_device = NULL;
+    }
+
     if (NULL != g_sysfs_conns_device) {
         device_remove_file(g_sysfs_conns_device, (const struct device_attribute *)&dev_attr_conns.attr);
         g_sysfs_conns_device = NULL;
@@ -684,7 +795,8 @@ clean_drivers(void)
 static void
 unregister_hooks(void)
 {
-    nf_unregister_net_hook(&init_net, &g_forward_hook);
+    nf_unregister_net_hook(&init_net, &g_pre_routing_hook);
+    nf_unregister_net_hook(&init_net, &g_local_out_hook);
 }
 
 
@@ -742,6 +854,35 @@ rules_modify(struct device *dev, struct device_attribute *attr, const char *buf,
     if (was_modified) {
         result = count;
     }
+
+    return result;
+}
+
+static ssize_t
+proxy_conns_assign(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+    ssize_t result = 0;
+    proxy_connection_t proxy_conn = {0};
+    unsigned long result_copy_from_user = 0;
+
+    if (sizeof(proxy_conn) > count) {
+        goto l_cleanup;
+    }
+
+    /* 1. Copy proxy details */
+    result_copy_from_user = copy_from_user(&proxy_conn, buf, count);
+    if (0 != result_copy_from_user) {
+        printk(KERN_ERR "%s: could not copy %d bytes from user\n", __func__, sizeof(proxy_conn));
+        result = -EINVAL;
+        goto l_cleanup;
+    }
+
+    if ('0' == buf[0]) {
+        FW_LOG_reset_logs();
+        result = count;
+    }
+
+l_cleanup:
 
     return result;
 }

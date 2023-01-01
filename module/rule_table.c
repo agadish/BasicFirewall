@@ -26,6 +26,7 @@
 
 #define IN_INTERFACE "enp0s8"
 #define OUT_INTERFACE "enp0s9"
+#define DEBUG_INTERFACE "enp0s3"
 #define LO_INTERFACE "lo"
 #define PORT_1023 (1023)
 #define PORT_MORE_THAN_1023 (1024)
@@ -339,6 +340,12 @@ RULE_TABLE_check(const rule_table_t *table,
         goto l_cleanup;
     }
 
+    if (0 == strncmp(skb->dev->name, DEBUG_INTERFACE, sizeof(skb->dev->name))) {
+        does_match = TRUE;
+        *action_out = NF_ACCEPT;
+        *reason_out = -16;
+    }
+
     /* 1. Go over the rules list */
     for (i = 0 ; i < table->rules_count ; ++i) {
         const rule_t * current_rule = &table->rules[i];
@@ -423,18 +430,21 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
     /* 1. Match soruce ip */
     if ((rule->src_ip & rule->src_prefix_mask) !=
             (ip_header->saddr & rule->src_prefix_mask)) {
+        /* printk(KERN_INFO "%s: fell for source ip\n", __func__); */
         goto l_cleanup;
     }
     
     /* 2. Match destionation ip */
     if ((rule->dst_ip & rule->dst_prefix_mask) !=
             (ip_header->daddr & rule->dst_prefix_mask)) {
+        /* printk(KERN_INFO "%s: fell for dst ip\n", __func__); */
         goto l_cleanup;
     }
 
     /* 3. Match protocol */
     if ((PROT_ANY != rule->protocol) && 
         (ip_header->protocol != rule->protocol)) {
+        /* printk(KERN_INFO "%s: fell for protocol\n", __func__); */
         goto l_cleanup;
     }
 
@@ -447,6 +457,7 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
             (!((PORT_MORE_THAN_1023_N == rule->src_port) && ntohs(tcp_header->source) > PORT_1023)) &&
             (rule->src_port != tcp_header->source))
         {
+            /* printk(KERN_INFO "%s: fell for src port\n", __func__); */
 
             goto l_cleanup;
         }
@@ -456,12 +467,13 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
             (!((PORT_MORE_THAN_1023_N == rule->dst_port) && ntohs(tcp_header->dest) > PORT_1023)) &&
             (rule->dst_port != tcp_header->dest))
         {
-
+            /* printk(KERN_INFO "%s: fell for dst port\n", __func__); */
             goto l_cleanup;
         }
 
         /* 4.3. TCP: match flags */
         if (!DOES_ACK_MATCH(tcp_header, rule)) {
+            /* printk(KERN_INFO "%s: fell for flags\n", __func__); */
             goto l_cleanup;
         }
     /* 5. UDP specific */
@@ -473,6 +485,7 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
             ((PORT_MORE_THAN_1023_N == rule->src_port) && ntohs(udp_header->source) <= PORT_1023))
         {
 
+            /* printk(KERN_INFO "%s: fell for sport\n", __func__); */
             goto l_cleanup;
         }
 
@@ -481,6 +494,7 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
             (rule->dst_port != udp_header->dest) &&
             ((PORT_MORE_THAN_1023_N == rule->dst_port) && ntohs(udp_header->dest) <= PORT_1023))
         {
+            /* printk(KERN_INFO "%s: fell for dport\n", __func__); */
 
             goto l_cleanup;
         }
@@ -491,6 +505,7 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
     /* Note: We will get no common bits for DIRECTION_UNKNOWN, or if the rule
      *       doesn't match the packet's direction */
     if (0 == (rule->direction & direction)) {
+        printk(KERN_INFO "%s: fell for direction\n", __func__);
         goto l_cleanup;
     }
 
