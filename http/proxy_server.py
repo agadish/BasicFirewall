@@ -25,6 +25,7 @@ class Reactor(object):
 
     def run_epoch(self):
         r_ready, _, _ = select.select(self._read_fds, [], [])
+        print('selected stuff!')
         for r_fd in r_ready:
             try:
                 self._read_fds[r_fd]()

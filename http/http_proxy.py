@@ -10,6 +10,7 @@ REJECTED_CONTENT_TYPES = ['text/csv', 'application/zip']
 
 class HTTPClientHandler(proxy_server.ClientHandler):
     def handle_client_request(self):
+        print('handle_client_request!')
         data = self.client_socket.read()
         if not data:
             # Connection is closed
@@ -18,6 +19,7 @@ class HTTPClientHandler(proxy_server.ClientHandler):
         self.server_socket.send(data)
 
     def handle_server_response(self):
+        print('handle_server_response!')
         try:
             response = http.client.HTTPResponse(self.server_socket)
             response.begin()
