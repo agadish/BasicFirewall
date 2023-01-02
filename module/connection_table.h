@@ -69,7 +69,7 @@ CONNECTION_TABLE_dump_data(const connection_table_t *table,
  */
 bool_t
 CONNECTION_TABLE_check(connection_table_t *table,
-                       const struct sk_buff *skb,
+                       struct sk_buff *skb,
                        __u8 *action_out,
                        reason_t *reason_out);
 

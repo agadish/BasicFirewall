@@ -10,6 +10,9 @@
 #include <linux/skbuff.h>
 #include <linux/in.h>
 #include <net/tcp.h>
+#include <linux/netdevice.h>
+#include <linux/inetdevice.h>
+#include <linux/ip.h>
 
 #include "fw.h"
 #include "fw_log.h"
@@ -33,7 +36,7 @@ typedef void (*entry_init_f)(connection_table_entry_t *entry,
 
 typedef void (*packet_handler_f)(connection_t *conn,
                                  connection_t *iconn,
-                                 const struct sk_buff *skb);
+                                 struct sk_buff *skb);
 
 
 /*    S T R U C T S   */
@@ -219,9 +222,28 @@ proxy_handle_packet(proxy_connection_t *conn,
 {
     struct iphdr *ip_header = ip_hdr(skb);
     struct tcphdr *tcp_header = tcp_hdr(skb);
+    struct in_device *in_dev = NULL;
+    struct net_device *dev = skb->dev;
+    struct in_ifaddr *ifa = NULL;
+    printk(KERN_INFO "%s (skb=%p): helloooo\n", __func__, skb);
 
+    /* Get IP address of incoming interface */
     ip_header->daddr = INADDR_LOOPBACK;
+    in_dev = (struct in_device *)dev->ip_ptr;
+    if (NULL != in_dev) {
+        ifa = in_dev->ifa_list;
+        if (NULL != ifa) {
+            ip_header->daddr = ifa->ifa_address;
+            printk(KERN_INFO "%s (skb=%p): new dest addr 0x%.8x\n", __func__, skb, ntohl(ip_header->daddr));
+        } else {
+            printk(KERN_WARNING "%s (skb=%p): device doesn't have an IP\n", __func__, skb);
+        }
+    } else {
+        printk(KERN_WARNING "%s (skb=%p): device doesn't have an IP\n", __func__, skb);
+    }
+
     tcp_header->dest = conn->proxy_port;
+    printk(KERN_INFO "%s (skb=%p): new dport %d\n", __func__, skb, ntohs(tcp_header->dest));
     
     /* Ignore failure of checksum */
     (void)fix_checksum(skb);
@@ -289,16 +311,22 @@ tcp_machine_state(connection_table_t *table,
         goto l_cleanup;
     }
 
-    /* printk(KERN_INFO "%s: hello\n", __func__); */
+    /* printk(KERN_INFO "%s (skb=%p): hello\n", __func__, skb); */
     /* 2. Handle TCP state machine */
-    printk(KERN_INFO "%s: state %d\n", __func__, conn->state);
+    printk(KERN_INFO "%s (skb=%p): state %d\n", __func__, skb, conn->state);
     switch (conn->state)
     {
     case TCP_CLOSE:
         if (tcp_header->syn) {
-            printk(KERN_INFO "%s: state CLOSE got syn!\n", __func__);
+            if (!tcp_header->ack) {
+            printk(KERN_INFO "%s (skb=%p): state CLOSE got syn!\n", __func__, skb);
             conn->state = TCP_SYN_SENT;
             iconn->state = TCP_SYN_RECV;
+            } else {
+                printk(KERN_INFO "%s (skb=%p): state CLOSE got syn-ack - illegal\n", __func__, skb);
+                is_legal_traffic = FALSE;
+                goto l_cleanup;
+            }
         } else {
             is_legal_traffic = FALSE;
             goto l_cleanup;
@@ -307,12 +335,12 @@ tcp_machine_state(connection_table_t *table,
     case TCP_ESTABLISHED:
         /* SYN is illegal, FIN is legal (and closes), everything else is legal */
         if (tcp_header->fin) {
-            /* printk(KERN_INFO "%s: state %d got fin\n", __func__, conn->state); */
+            /* printk(KERN_INFO "%s (skb=%p): state %d got fin\n", __func__, skb, conn->state); */
             conn->state = TCP_FIN_WAIT1;
             iconn->state = TCP_CLOSE_WAIT;
         } else if (tcp_header->syn) {
             /* Detect invalid traffic */
-            printk(KERN_INFO "%s: state %d illegal traffic with syn\n", __func__, conn->state);
+            printk(KERN_INFO "%s (skb=%p): state %d illegal traffic with syn\n", __func__, skb, conn->state);
             is_legal_traffic = FALSE;
             goto l_cleanup;
         } else {
@@ -322,11 +350,11 @@ tcp_machine_state(connection_table_t *table,
     case TCP_SYN_SENT:
         /* Allowed only ACK */
         if (tcp_header->fin || (!tcp_header->ack)) {
-            printk(KERN_INFO "%s: state %d illegal traffic with FIN-ACK\n", __func__, conn->state);
+            printk(KERN_INFO "%s (skb=%p): state %d illegal traffic with FIN=%d ACK=%d\n", __func__, skb, conn->state, tcp_header->fin, tcp_header->ack);
             is_legal_traffic = FALSE;
             goto l_cleanup;
         } else if (tcp_header->ack) {
-            /* printk(KERN_INFO "%s: state %d got ack\n", __func__, conn->state); */
+            /* printk(KERN_INFO "%s (skb=%p): state %d got ack\n", __func__, skb, conn->state); */
             conn->state = TCP_ESTABLISHED;
             iconn->state = TCP_ESTABLISHED;
         }
@@ -335,15 +363,15 @@ tcp_machine_state(connection_table_t *table,
         /* Nothing should be sent after SYN+ACK - drop the connection.
          * Note: it might be accepted later and its not our concern */
         if (tcp_header->syn && tcp_header->ack) {
-            /* printk(KERN_INFO "%s: state %d got synack\n", __func__, conn->state); */
+            /* printk(KERN_INFO "%s (skb=%p): state %d got synack\n", __func__, skb, conn->state); */
             conn->state = TCP_ESTABLISHED;
             iconn->state = TCP_ESTABLISHED;
         } else if (tcp_header->fin) {
-            /* printk(KERN_INFO "%s: state %d got fin\n", __func__, conn->state); */
+            /* printk(KERN_INFO "%s (skb=%p): state %d got fin\n", __func__, skb, conn->state); */
             conn->state = TCP_CLOSE_WAIT;
             iconn->state = TCP_FIN_WAIT1;
         } else {
-            printk(KERN_INFO "%s: state %d got illegal traffic\n", __func__, conn->state);
+            printk(KERN_INFO "%s (skb=%p): state %d got illegal traffic\n", __func__, skb, conn->state);
             is_legal_traffic = FALSE;
             goto l_cleanup;
         }
@@ -351,48 +379,48 @@ tcp_machine_state(connection_table_t *table,
     case TCP_FIN_WAIT1:
         if (tcp_header->fin) {
             if (tcp_header->ack) {
-                /* printk(KERN_INFO "%s: state %d got finack\n", __func__, conn->state); */
+                /* printk(KERN_INFO "%s (skb=%p): state %d got finack\n", __func__, skb, conn->state); */
                 conn->state = TCP_TIME_WAIT;
                 iconn->state = TCP_CLOSING;
             } else {
-                /* printk(KERN_INFO "%s: state %d got fin\n", __func__, conn->state); */
+                /* printk(KERN_INFO "%s (skb=%p): state %d got fin\n", __func__, skb, conn->state); */
                 conn->state = TCP_CLOSING;
                 iconn->state = TCP_TIME_WAIT;
             }
         } else if (tcp_header->ack) {
-            /* printk(KERN_INFO "%s: state %d got ack\n", __func__, conn->state); */
+            /* printk(KERN_INFO "%s (skb=%p): state %d got ack\n", __func__, skb, conn->state); */
             conn->state = TCP_FIN_WAIT2;
             iconn->state = TCP_CLOSE_WAIT;
         }
         break;
     case TCP_FIN_WAIT2:
         if (tcp_header->fin) {
-            /* printk(KERN_INFO "%s: state %d got fin\n", __func__, conn->state); */
+            /* printk(KERN_INFO "%s (skb=%p): state %d got fin\n", __func__, skb, conn->state); */
             conn->state = TCP_TIME_WAIT;
             iconn->state = TCP_CLOSING;
         }
         break;
     case TCP_CLOSING:
         if (tcp_header->ack) {
-            /* printk(KERN_INFO "%s: state %d got ack\n", __func__, conn->state); */
+            /* printk(KERN_INFO "%s (skb=%p): state %d got ack\n", __func__, skb, conn->state); */
             conn->state = TCP_TIME_WAIT;
             iconn->state = TCP_FIN_WAIT2;
         }
         break;
     case TCP_LAST_ACK:
     case TCP_TIME_WAIT:
-        /* printk(KERN_INFO "%s: state %d discarding\n", __func__, conn->state); */
+        /* printk(KERN_INFO "%s (skb=%p): state %d discarding\n", __func__, skb, conn->state); */
         discard_connection(table, conn, iconn);
         break;
     case TCP_CLOSE_WAIT:
         if (tcp_header->ack) {
-            /* printk(KERN_INFO "%s: state %d got ack\n", __func__, conn->state); */
+            /* printk(KERN_INFO "%s (skb=%p): state %d got ack\n", __func__, skb, conn->state); */
             conn->state = TCP_LAST_ACK;
             iconn->state = TCP_TIME_WAIT;
         }
         break;
     default:
-        printk(KERN_INFO "%s: state %d UNKNOWN! discarding\n", __func__, conn->state);
+        printk(KERN_INFO "%s (skb=%p): state %d UNKNOWN! discarding\n", __func__, skb, conn->state);
         is_legal_traffic = FALSE;
         goto l_cleanup;
     }
@@ -427,7 +455,7 @@ CONNECTION_TABLE_track_local_out(connection_table_t *table,
      *       Unless, a connection exists for this SYN packet, and it will be handled accordingly */
     entry = search_entry(table, skb);
     if (NULL == entry) {
-        /* printk(KERN_INFO "%s: no entry for 0x%.8x:0x%.4x -> 0x%.8x->0x%.4x\n", __func__, ip_hdr(skb)->saddr, tcp_hdr(skb)->source, ip_hdr(skb)->daddr, tcp_hdr(skb)->dest); */
+        /* printk(KERN_INFO "%s (skb=%p): no entry for 0x%.8x:0x%.4x -> 0x%.8x->0x%.4x\n", __func__, skb, ip_hdr(skb)->saddr, tcp_hdr(skb)->source, ip_hdr(skb)->daddr, tcp_hdr(skb)->dest); */
         goto l_cleanup;
     }
 
@@ -435,7 +463,7 @@ CONNECTION_TABLE_track_local_out(connection_table_t *table,
     if (NULL == entry) {
         printk(KERN_WARNING "%s: Found an entry in the connection table without its inverse!" \
             " src_ip=0x%.8x dst_ip=0x%.8x src_port=0x%.4x dst_port=0x%.4x\n",
-            __func__, entry->conn.id.src_ip, entry->conn.id.dst_ip, entry->conn.id.src_port, entry->conn.id.dst_port);
+            __func__, ntohl(entry->conn.id.src_ip), ntohl(entry->conn.id.dst_ip), entry->conn.id.src_port, entry->conn.id.dst_port);
         goto l_cleanup;
     }
 
@@ -459,7 +487,7 @@ l_cleanup:
 
 bool_t
 CONNECTION_TABLE_check(connection_table_t *table,
-                       const struct sk_buff *skb,
+                       struct sk_buff *skb,
                        __u8 *action_out,
                        reason_t *reason_out)
 {
@@ -474,12 +502,26 @@ CONNECTION_TABLE_check(connection_table_t *table,
         goto l_cleanup;
     }
 
+    /* 1. Filter non_TCP packets */
+    if (htons(ETH_P_IP) != skb->protocol) {
+
+        printk(KERN_ERR "%s: skb is not ip!\n", __func__);
+        goto l_cleanup;
+    }
+    if (IPPROTO_TCP != ip_hdr(skb)->protocol) {
+        if (htons(ETH_P_IP) != skb->protocol) {
+            printk(KERN_ERR "%s: skb is not ip!\n", __func__);
+        }
+        printk(KERN_INFO "%s: ignoring non-tcp packet %p\n", __func__, skb);
+        goto l_cleanup;
+    }
+
     /* 1. Check if exists on the table */
     /* Note: For SYN packets it won't match, and the handling will be done here...
      *       Unless, a connection exists for this SYN packet, and it will be handled accordingly */
     entry = search_entry(table, skb);
     if (NULL == entry) {
-        printk(KERN_INFO "%s: no entry for 0x%.8x:0x%.4x -> 0x%.8x->0x%.4x\n", __func__, ip_hdr(skb)->saddr, tcp_hdr(skb)->source, ip_hdr(skb)->daddr, tcp_hdr(skb)->dest);
+        printk(KERN_INFO "%s (skb=%p): no entry for 0x%.8x:%d -> 0x%.8x:%d\n", __func__, skb, ntohl(ip_hdr(skb)->saddr), ntohs(tcp_hdr(skb)->source), ntohl(ip_hdr(skb)->daddr), ntohs(tcp_hdr(skb)->dest));
         goto l_cleanup;
     }
 
@@ -487,11 +529,11 @@ CONNECTION_TABLE_check(connection_table_t *table,
     if (NULL == entry) {
         printk(KERN_WARNING "%s: Found an entry in the connection table without its inverse!" \
             " src_ip=0x%.8x dst_ip=0x%.8x src_port=0x%.4x dst_port=0x%.4x\n",
-            __func__, entry->conn.id.src_ip, entry->conn.id.dst_ip, entry->conn.id.src_port, entry->conn.id.dst_port);
+            __func__, ntohl(entry->conn.id.src_ip), ntohl(entry->conn.id.dst_ip), entry->conn.id.src_port, entry->conn.id.dst_port);
         goto l_cleanup;
     }
 
-    printk(KERN_INFO "%s: entry=0x%.8x, ientry=0x%.8x\n", __func__, (uint32_t)entry, (uint32_t)ientry);
+    printk(KERN_INFO "%s (skb=%p): entry=0x%.8x, ientry=0x%.8x\n", __func__, skb, (uint32_t)entry, (uint32_t)ientry);
     was_handled = TRUE;
     is_legal_traffic = tcp_machine_state(table, skb, &entry->conn, &ientry->conn);
     if (is_legal_traffic) {
@@ -573,15 +615,17 @@ proxy_entry_init(proxy_connection_table_entry_t *entry,
     switch (tcp_header->dest) 
     {
         case HTTP_PORT_N:
+    printk(KERN_INFO "%s (skb=%p): hello port 80\n", __func__, skb);
             entry->conn.proxy_port = HTTP_USER_PORT_N;
             ientry->conn.proxy_port = 0;
             break;
         case FTP_PORT_N:
+    printk(KERN_INFO "%s (skb=%p): hello port 21\n", __func__, skb);
             entry->conn.proxy_port = FTP_USER_PORT_N;
             ientry->conn.proxy_port = 0;
             break;
         default:
-            printk(KERN_ERR "%s: got port that is not HTTP/FTP: %d\n", __func__, ntohs(tcp_header->dest));
+            printk(KERN_ERR "%s (skb=%p): got port that is not HTTP/FTP: %d\n", __func__, skb, ntohs(tcp_header->dest));
             break;
     }
 
@@ -693,7 +737,7 @@ CONNECTION_TABLE_handle_accepted_syn(connection_table_t *table,
                 original_pconn->proxy_port = FTP_USER_PORT_N;
                 break;
             default:
-                printk(KERN_ERR "%s: error dest port not found\n", __func__);
+                printk(KERN_ERR "%s (skb=%p): error dest port not found\n", __func__, skb);
                 break;
         }
     }
@@ -702,7 +746,7 @@ CONNECTION_TABLE_handle_accepted_syn(connection_table_t *table,
     klist_add_tail(&original_entry_node->node, &table->list);
     klist_add_tail(&inverse_entry_node->node, &table->list);
 
-    printk(KERN_INFO "%s: added entry+reverse entry\n", __func__);
+    printk(KERN_INFO "%s (skb=%p): added entry+reverse entry\n", __func__, skb);
 
     /* Success */
     result = E__SUCCESS;
@@ -789,7 +833,7 @@ l_cleanup:
 /*                 original_pconn->proxy_port = FTP_USER_PORT_N; */
 /*                 break; */
 /*             default: */
-/*                 printk(KERN_ERR "%s: error dest port not found\n", __func__); */
+/*                 printk(KERN_ERR "%s (skb=%p): error dest port not found\n", __func__, skb); */
 /*                 break; */
 /*         } */
 /*     } */
@@ -797,7 +841,7 @@ l_cleanup:
 /*     [> 3. Add entries <] */
 /*     klist_add_tail(&original_entry_node->node, &table->list); */
 /*     klist_add_tail(&inverse_entry_node->node, &table->list); */
-/*     printk(KERN_INFO "%s: added entry+reverse entry\n", __func__); */
+/*     printk(KERN_INFO "%s (skb=%p): added entry+reverse entry\n", __func__, skb); */
 /*  */
 /*     [> Success <] */
 /*     result = E__SUCCESS; */
@@ -891,7 +935,7 @@ search_inverse_entry(const connection_table_t *table, const connection_t *conn)
     next_node = (connection_table_entry_t *)klist_next(&list_iter);
     next_node = (connection_table_entry_t *)klist_next(&list_iter);
     if (NULL != next_node) {
-        printk(KERN_INFO "%s: next exists 0x%.8x:0x%.4x -> 0x%.8x:0x%.4x\n", __func__, next_node->conn.id.src_ip,next_node->conn.id.src_port, next_node->conn.id.dst_ip, next_node->conn.id.dst_ip);
+        printk(KERN_INFO "%s: next exists 0x%.8x:%d -> 0x%.8x:%d\n", __func__, next_node->conn.id.src_ip, ntohs(next_node->conn.id.src_port), next_node->conn.id.dst_ip, ntohs(next_node->conn.id.dst_port));
     } else {
         printk(KERN_INFO "%s: next of 0x%.8x is NULL\n", __func__, (uint32_t)&node->node);
     }
