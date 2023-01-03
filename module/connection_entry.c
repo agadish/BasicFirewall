@@ -8,10 +8,14 @@
 /*   I N C L U D E S   */
 #include <linux/types.h>
 #include <linux/skbuff.h>
+#include <net/tcp.h>
+#include <linux/netdevice.h>
+#include <linux/inetdevice.h>
+#include <linux/ip.h>
 
 #include "common.h"
 #include "fw.h"
-#include "connection.h"
+#include "connection_entry.h"
 #include "fw_results.h"
 
 
@@ -24,21 +28,25 @@ static void
 proxy_entry_init_by_skb(connection_entry_t *entry,
                         const struct sk_buff *skb);
 
-static void
-entry_init_by_id(connection_entry_t *entry,
-                 const connection_id_t * id);
+/* static void */
+/* entry_init_by_id(connection_entry_t *entry, */
+/*                  const connection_id_t * id); */
 
 static void
 connection_id_flip(connection_id_t *dest,
                    const connection_id_t *src);
 
-static void
-proxy_entry_init_by_id(connection_entry_t *entry,
-                       const connection_id_t *id);
+/* static void */
+/* proxy_entry_init_by_id(connection_entry_t *entry, */
+/*                        const connection_id_t *id); */
 
 static void
 proxy_init_proxy_ports(connection_entry_t *entry,
                        uint16_t port_n);
+
+static void
+entry_packet_hook(connection_entry_t *entry,
+                          struct sk_buff *skb);
 
 static void
 proxy_entry_packet_hook(connection_entry_t *entry,
@@ -75,23 +83,27 @@ connection_alloc(connection_t **conn_out);
 static result_t
 proxy_connection_alloc(proxy_connection_t **proxy_conn_out);
 
+static bool_t
+does_proxy_connection_match_skb(proxy_connection_t *proxy_conn,
+                                const struct sk_buff *skb);
+
 
 
 /*   G L O B A L S   */
-connection_entry_vtable_t g_vtable_connection_direct = {
+connection_entry_vtbl_t g_vtable_connection_direct = {
     .type = CONNECTION_TYPE_DIRECT,
-    .connection_alloc = connection_alloc;
+    .connection_alloc = connection_alloc,
     .init_by_skb = entry_init_by_skb,
-    .init_by_id = entry_init_by_inverse,
-    .hook = entry_hook,
+    /* .init_by_id = entry_init_by_id, */
+    .hook = entry_packet_hook,
     .compare = entry_compare_packet
 };
 
-connection_entry_vtable_t g_vtable_connection_proxy = {
+connection_entry_vtbl_t g_vtable_connection_proxy = {
     .type = CONNECTION_TYPE_PROXY,
-    .connection_alloc = (connection_alloc_f)proxy_connection_alloc;
+    .connection_alloc = (connection_alloc_f)proxy_connection_alloc,
     .init_by_skb = proxy_entry_init_by_skb,
-    .init_by_id = proxy_entry_init_by_id,
+    /* .init_by_id = proxy_entry_init_by_id, */
     .hook = proxy_entry_packet_hook,
     .compare = proxy_entry_compare_packet
 };
@@ -111,7 +123,7 @@ connection_alloc(connection_t **conn_out)
     }
 
     /* 1. Allocate a new connection*/
-    conn = (connection_t *)kmalloc(sizeof(*conn), GPF_KERNEL);
+    conn = (connection_t *)kmalloc(sizeof(*conn), GFP_KERNEL);
     if (NULL == conn) {
         result = E__KMALLOC_ERROR;
         goto l_cleanup;
@@ -122,7 +134,7 @@ connection_alloc(connection_t **conn_out)
     *conn_out = conn;
 
     result = E__SUCCESS;
-l_clenaup:
+l_cleanup:
     if (E__SUCCESS != result) {
         KFREE_SAFE(conn);
     }
@@ -143,7 +155,7 @@ proxy_connection_alloc(proxy_connection_t **proxy_conn_out)
     }
 
     /* 1. Allocate a new connection*/
-    proxy_conn = (proxy_connection_t *)kmalloc(sizeof(*proxy_conn), GPF_KERNEL);
+    proxy_conn = (proxy_connection_t *)kmalloc(sizeof(*proxy_conn), GFP_KERNEL);
     if (NULL == proxy_conn) {
         result = E__KMALLOC_ERROR;
         goto l_cleanup;
@@ -154,7 +166,7 @@ proxy_connection_alloc(proxy_connection_t **proxy_conn_out)
     *proxy_conn_out = proxy_conn;
 
     result = E__SUCCESS;
-l_clenaup:
+l_cleanup:
     if (E__SUCCESS != result) {
         KFREE_SAFE(proxy_conn);
     }
@@ -206,7 +218,7 @@ proxy_entry_init_by_skb(connection_entry_t *entry,
     entry_init_by_skb(entry, skb);
 
     /* 2. Init proxy port */
-    proxy_init_proxy_ports(tcp_hdr(skb)->dest
+    proxy_init_proxy_ports(entry, tcp_hdr(skb)->dest);
 
 l_cleanup:
     return;
@@ -216,10 +228,10 @@ static void
 connection_id_flip(connection_id_t *result,
                    const connection_id_t *origin)
 {
-    result->dest_ip = origin->src_ip;
-    result->dest_port = origin->src_port;
-    result->src_ip = origin->dest_ip;
-    result->src_port = origin->dest_port;
+    result->dst_ip = origin->src_ip;
+    result->dst_port = origin->src_port;
+    result->src_ip = origin->dst_ip;
+    result->src_port = origin->dst_port;
 }
 
 static bool_t
@@ -264,18 +276,18 @@ l_cleanup:
     return should_be_dropped;
 }
 
-static void
-entry_init_by_id(connection_entry_t *entry,
-                 const connection_id_t * id)
-{
-    /* 1. Init ID's */
-    (void)memcpy(&entry->client->id, id, sizeof(*id));
-    connection_id_flip(&entry->server->id, &entry->client->id);
-
-    /* 2. Init states */
-    entry->server->state = TCP_CLOSE;
-    entry->client->state = TCP_CLOSE;
-}
+/* static void */
+/* entry_init_by_id(connection_entry_t *entry, */
+/*                  const connection_id_t * id) */
+/* { */
+/*     [> 1. Init ID's <] */
+/*     (void)memcpy(&entry->client->id, id, sizeof(*id)); */
+/*     connection_id_flip(&entry->server->id, &entry->client->id); */
+/*  */
+/*     [> 2. Init states <] */
+/*     entry->server->state = TCP_CLOSE; */
+/*     entry->client->state = TCP_CLOSE; */
+/* } */
 
 static void
 proxy_init_proxy_ports(connection_entry_t *entry,
@@ -284,40 +296,39 @@ proxy_init_proxy_ports(connection_entry_t *entry,
     switch (port_n) 
     {
         case HTTP_PORT_N:
-            printk(KERN_INFO "%s (skb=%p): hello port 80\n", __func__, skb);
+            printk(KERN_INFO "%s: hello port 80\n", __func__);
             entry->client_proxy->proxy_port = HTTP_USER_PORT_N;
             entry->server_proxy->proxy_port = 0; /* Will be set later */
             break;
         case FTP_PORT_N:
-            printk(KERN_INFO "%s (skb=%p): hello port 21\n", __func__, skb);
+            printk(KERN_INFO "%s: hello port 21\n", __func__);
             entry->client_proxy->proxy_port = FTP_USER_PORT_N;
             entry->server_proxy->proxy_port = 0; /* Will be set later */
             break;
         default:
-            printk(KERN_ERR "%s (skb=%p): got port that is not HTTP/FTP: %d\n", __func__, skb, ntohs(tcp_header->dest));
-            goto l_cleanup;
+            printk(KERN_ERR "%s: got port that is not HTTP/FTP: %d\n", __func__, ntohs(port_n));
             break;
     }
 }
 
-static void
-proxy_entry_init_by_id(connection_entry_t *entry,
-                       const connection_id_t *id)
-{
-    /* 0. Input validation */
-    if ((NULL == entry) || (NULL == id)) {
-        goto l_cleanup;
-    }
-
-    /* 1. Call super function */
-    entry_init_by_id(entry, id);
-
-    /* 2. Init proxy port */
-    proxy_init_proxy_ports(tcp_hdr(skb)->dest
-
-l_cleanup:
-    return;
-}
+/* static void */
+/* proxy_entry_init_by_id(connection_entry_t *entry, */
+/*                        const connection_id_t *id) */
+/* { */
+/*     [> 0. Input validation <] */
+/*     if ((NULL == entry) || (NULL == id)) { */
+/*         goto l_cleanup; */
+/*     } */
+/*  */
+/*     [> 1. Call super function <] */
+/*     entry_init_by_id(entry, id); */
+/*  */
+/*     [> 2. Init proxy port <] */
+/*     proxy_init_proxy_ports(entry, tcp_hdr(skb)->dest */
+/*  */
+/* l_cleanup: */
+/*     return; */
+/* } */
 
 static uint32_t
 get_local_ip(struct net_device *dev)
@@ -346,7 +357,7 @@ static entry_cmp_result_t
 entry_compare_packet(connection_entry_t *entry,
                      const struct sk_buff *skb)
 {
-    entry_cmp_result_t result = ENTRY_CMP_RESULT_INVALID;
+    entry_cmp_result_t result = ENTRY_CMP_MISMATCH;
     struct iphdr *ip_header = NULL;
     struct tcphdr *tcp_header = NULL;
 
@@ -374,7 +385,7 @@ static entry_cmp_result_t
 proxy_entry_compare_packet(connection_entry_t *entry,
                            const struct sk_buff *skb)
 {
-    entry_cmp_result_t result = ENTRY_CMP_RESULT_INVALID;
+    entry_cmp_result_t result = ENTRY_CMP_MISMATCH;
     struct iphdr *ip_header = NULL;
     struct tcphdr *tcp_header = NULL;
 
@@ -435,8 +446,8 @@ does_proxy_connection_match_skb(proxy_connection_t *proxy_conn,
 
     if ((ip_header->saddr == local_ip) &&
         ((0 == proxy_conn->proxy_port) || (tcp_header->source == proxy_conn->proxy_port)) &&
-        (ip_header->daddr == proxy_conn->base.id->dst_ip) &&
-        (tcp_header->dest == proxy_conn->base.id->dst_port))
+        (ip_header->daddr == proxy_conn->base.id.dst_ip) &&
+        (tcp_header->dest == proxy_conn->base.id.dst_port))
     {
         does_match = TRUE;
     }
@@ -448,8 +459,8 @@ static void
 entry_packet_hook(connection_entry_t *entry,
                           struct sk_buff *skb)
 {
-    UNUSED_PARAM(entry);
-    UNUSED_PARAM(skb);
+    UNUSED_ARG(entry);
+    UNUSED_ARG(skb);
 
     /* No processing is required */
 }
@@ -463,8 +474,8 @@ proxy_entry_packet_hook(connection_entry_t *entry,
     entry_cmp_result_t cmp_result = ENTRY_CMP_MISMATCH;
     bool_t was_modified = TRUE;
 
-    entry_cmp_result = CONNECTION_ENTRY_compare(entry, skb);
-    switch (entry_cmp_result) 
+    cmp_result = CONNECTION_ENTRY_compare(entry, skb);
+    switch (cmp_result) 
     {
     case ENTRY_CMP_FROM_CLIENT:
         ip_header->daddr = get_local_ip(skb->dev);
@@ -525,8 +536,7 @@ CONNECTION_ENTRY_create_from_syn(connection_entry_t **entry_out,
 {
     result_t result = E__UNKNOWN;
     connection_entry_t *entry = NULL;
-    bool_t is_proxy = FALSE;
-    const connection_entry_vtable_t *vtable = NULL;
+    connection_entry_vtbl_t *vtable = NULL;
 
     /* 0. Input validation */
     if ((NULL == entry_out) || (NULL == skb)) {
@@ -536,7 +546,7 @@ CONNECTION_ENTRY_create_from_syn(connection_entry_t **entry_out,
 
     /* 1. Determine if proxy */
     /* 1.1. Check by destination port */
-    switch (tcp_header->dest)
+    switch (tcp_hdr(skb)->dest)
     {
         case HTTP_PORT_N:
         case FTP_PORT_N:
@@ -548,7 +558,7 @@ CONNECTION_ENTRY_create_from_syn(connection_entry_t **entry_out,
     }
 
     /* 2. Allocate entry */
-    entry = (connection_entry_t *)kmalloc(sizeof(*entry), GPF_KERNEL);
+    entry = (connection_entry_t *)kmalloc(sizeof(*entry), GFP_KERNEL);
     if (NULL == entry) {
         printk(KERN_ERR "%s: can't allocate entry\n", __func__);
         result = E__KMALLOC_ERROR;
@@ -567,14 +577,14 @@ CONNECTION_ENTRY_create_from_syn(connection_entry_t **entry_out,
         goto l_cleanup;
     }
     /* 4.2. Server connection */
-    result = CONNECTION_ENTRY_connection_alloc(&server->client);
+    result = CONNECTION_ENTRY_connection_alloc(&entry->server);
     if (E__SUCCESS != result) {
         printk(KERN_ERR "%s: can't allocate client connection\n", __func__);
         goto l_cleanup;
     }
 
     /* 5. Init entry's connection */
-    CONNECTION_ENTRY_init_by_skb(entry);
+    CONNECTION_ENTRY_init_by_skb(entry, skb);
 
     /* Success */
     *entry_out = entry;
@@ -593,9 +603,9 @@ void
 CONNECTION_ENTRY_destroy(connection_entry_t *entry)
 {
     if (NULL != entry) {
-        FREE_SAFE(entry->client);
-        FREE_SAFE(entry->server);
+        KFREE_SAFE(entry->client);
+        KFREE_SAFE(entry->server);
     }
 
-    FREE_SAFE(entry);
+    KFREE_SAFE(entry);
 }

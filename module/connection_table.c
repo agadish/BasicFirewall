@@ -9,10 +9,6 @@
 #include <linux/types.h>
 #include <linux/skbuff.h>
 #include <linux/in.h>
-#include <net/tcp.h>
-#include <linux/netdevice.h>
-#include <linux/inetdevice.h>
-#include <linux/ip.h>
 
 #include "fw.h"
 #include "fw_log.h"
@@ -45,19 +41,13 @@ is_syn_packet(const struct tcphdr *tcp_header);
 static bool_t
 tcp_machine_state(connection_table_t *table,
                   const struct sk_buff *skb,
-                  connection_t *entry,
-                  connection_t *ientry);
+                  connection_entry_t *entry,
+                  entry_cmp_result_t cmp_result);
 
 static entry_cmp_result_t
 search_entry(struct klist *entries_list,
              const struct sk_buff *skb,
              connection_entry_t **entry_out);
-
-static connection_entry_t *
-search_entry_by_id(const connection_table_t *table, const connection_id_t *id);
-
-static void
-get_skb_id(const struct sk_buff *skb, connection_id_t * id_out);
 
 static void
 remove_entry(connection_entry_t *entry);
@@ -193,13 +183,13 @@ tcp_machine_state(connection_table_t *table,
     /* 1. Initialize sender and receiver */
     switch (cmp_result)
     {
-    case CMP_FROM_CLIENT:
-    case CMP_TO_SERVER:
+    case ENTRY_CMP_FROM_CLIENT:
+    case ENTRY_CMP_TO_SERVER:
         sender = entry->client;
         receiver = entry->server;
         break;
-    case CMP_FROM_SERVER:
-    case CMP_TO_CLIENT:
+    case ENTRY_CMP_FROM_SERVER:
+    case ENTRY_CMP_TO_CLIENT:
         sender = entry->server;
         receiver = entry->client;
         break;
@@ -341,7 +331,6 @@ CONNECTION_TABLE_track_local_out(connection_table_t *table,
 {
     bool_t was_handled = FALSE;
     connection_entry_t *entry = NULL;
-    connection_entry_t *ientry = NULL;
     bool_t is_proxy_connection = FALSE;
     entry_cmp_result_t cmp_result = ENTRY_CMP_MISMATCH;
 
@@ -360,7 +349,7 @@ CONNECTION_TABLE_track_local_out(connection_table_t *table,
         goto l_cleanup;
     }
 
-    is_proxy_connection = IS_PROXY_ENRY(entry);
+    is_proxy_connection = IS_PROXY_ENTRY(entry);
     if (is_proxy_connection) {
 
         /* switch (conn->state) */
@@ -445,7 +434,8 @@ CONNECTION_TABLE_handle_accepted_syn(connection_table_t *table,
 {
     result_t result = E__UNKNOWN;
     connection_entry_t *entry = NULL;
-    bool_t is_proxy = FALSE;
+    struct iphdr *ip_header = NULL;
+    struct tcphdr *tcp_header = NULL;
 
     /* 0. Input validation */
     /* 0.1. NULL validation */
@@ -455,6 +445,7 @@ CONNECTION_TABLE_handle_accepted_syn(connection_table_t *table,
     }
 
     /* 0.2. TCP SYN validation */
+    ip_header = ip_hdr(skb);
     if (IPPROTO_TCP != ip_header->protocol) {
         result = E__SUCCESS;
         goto l_cleanup;
@@ -494,7 +485,7 @@ search_entry(struct klist *entries_list,
              const struct sk_buff *skb,
              connection_entry_t **entry_out)
 {
-    entry_cmp_result_t current_result = ENTRY_CMP_MISMATCH;
+    entry_cmp_result_t cmp_result = ENTRY_CMP_MISMATCH;
     connection_entry_t *entry = NULL;
     struct klist_iter list_iter = {0};
 
@@ -511,8 +502,8 @@ search_entry(struct klist *entries_list,
         }
 
         /* 3. Check if matches */
-        current_result = CONNECTION_ENTRY_compare(entry, skb);
-        if (ENTRY_CMP_MISMATCH != current_result) {
+        cmp_result = CONNECTION_ENTRY_compare(entry, skb);
+        if (ENTRY_CMP_MISMATCH != cmp_result) {
             /* 4. On match - return the entry and stop the iteration */
             *entry_out = entry;
             break;
@@ -521,7 +512,7 @@ search_entry(struct klist *entries_list,
 
     klist_iter_exit(&list_iter);
 
-    return result;
+    return cmp_result;
 }
 
 static void

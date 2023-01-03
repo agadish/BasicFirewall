@@ -13,6 +13,7 @@
 
 #include "fw.h"
 #include "common.h"
+#include "connection_entry.h"
 #include "fw_results.h"
 
 
