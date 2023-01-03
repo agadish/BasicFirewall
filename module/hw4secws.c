@@ -366,15 +366,16 @@ hw4secws_hookfn_local_out(
     const struct nf_hook_state *state
 ){
     __u8 action = NF_ACCEPT;
-    bool_t has_conns_match = FALSE;
+    entry_cmp_result_t conns_match = ENTRY_CMP_MISMATCH;
     reason_t reason = REASON_FW_INACTIVE;
 
     UNUSED_ARG(priv);
     UNUSED_ARG(state);
 
     /* Ignore errors */
-    has_conns_match = CONNECTION_TABLE_check(g_connection_table, skb, &action, &reason);
-    if (!has_conns_match) {
+    printk(KERN_INFO "%s: CONNECTION_TABLE_check for skb=%s\n", __func__, SKB_str(skb));
+    conns_match = CONNECTION_TABLE_check(g_connection_table, skb, &action, &reason);
+    if (ENTRY_CMP_MISMATCH == conns_match) {
         printk(KERN_INFO "%s: has no conns match, will pass to rule table\n", __func__);
         /* 4. Check the rule table */
         if (tcp_hdr(skb)->syn) {
@@ -399,7 +400,7 @@ hw4secws_hookfn_pre_routing(
     const struct nf_hook_state *state
 ){
     __u8 action = NF_DROP;
-    bool_t has_conns_match = FALSE;
+    entry_cmp_result_t conns_match = ENTRY_CMP_MISMATCH;
     bool_t has_rule_match = FALSE;
     bool_t should_log = TRUE;
     reason_t reason = REASON_FW_INACTIVE;
@@ -419,12 +420,13 @@ hw4secws_hookfn_pre_routing(
         goto l_cleanup;
     } else {
         /* 3. Check the connection table */
-        has_conns_match = CONNECTION_TABLE_check(g_connection_table, skb, &action, &reason);
-        if (has_conns_match) {
+        printk(KERN_INFO "%s: CONNECTION_TABLE_check for skb=%s\n", __func__, SKB_str(skb));
+        conns_match = CONNECTION_TABLE_check(g_connection_table, skb, &action, &reason);
+        if (ENTRY_CMP_MISMATCH != conns_match) {
             printk(KERN_INFO "%s: has a conn match!\n", __func__);
             should_log = FALSE;
         } else {
-            /* printk(KERN_INFO "%s: has no conns match, will pass to rule table\n", __func__); */
+            printk(KERN_INFO "%s: has no conns match, will pass to rule table\n", __func__);
             /* 4. Check the rule table */
             has_rule_match = RULE_TABLE_check(&g_rule_table, skb, &action, &reason);
             if (!has_rule_match) {
@@ -437,12 +439,13 @@ hw4secws_hookfn_pre_routing(
             /* 5. Matching rule - should bes SYN, update connection table */
             if (IPPROTO_TCP == ip_hdr(skb)->protocol) {
                 /* For sure it has syn */
-                if (tcp_hdr(skb)->syn) {
+                if ((tcp_hdr(skb)->syn) && (!tcp_hdr(skb)->ack)) {
                     /* Ignore failure */
                     (void)CONNECTION_TABLE_handle_accepted_syn(g_connection_table, skb);
                     /* 6. Check the connection table once again - after inserting new rule */
-                    has_conns_match = CONNECTION_TABLE_check(g_connection_table, skb, &action, &reason);
-                    if (has_conns_match) {
+                    printk(KERN_INFO "%s: CONNECTION_TABLE_check for skb=%s first syn\n", __func__, SKB_str(skb));
+                    conns_match = CONNECTION_TABLE_check(g_connection_table, skb, &action, &reason);
+                    if (ENTRY_CMP_MISMATCH != conns_match) {
                         printk(KERN_INFO "%s: has a conn match second time!\n", __func__);
                         should_log = FALSE;
                     }

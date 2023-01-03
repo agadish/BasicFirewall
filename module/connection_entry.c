@@ -480,7 +480,7 @@ proxy_entry_packet_hook(connection_entry_t *entry,
     case ENTRY_CMP_FROM_CLIENT:
         ip_header->daddr = get_local_ip(skb->dev);
         if (INADDR_LOOPBACK == ip_header->daddr) {
-            printk(KERN_ERR "%s (skb=%p): dest addr from clientis INADDR_LOOPBACK\n", __func__, skb);
+            printk(KERN_ERR "%s (skb=%s): dest addr from clientis INADDR_LOOPBACK\n", __func__, SKB_str(skb));
             /* XXX: log? */
         }
         tcp_header->dest = entry->client_proxy->proxy_port;
@@ -490,7 +490,7 @@ proxy_entry_packet_hook(connection_entry_t *entry,
     case ENTRY_CMP_FROM_SERVER:
         ip_header->daddr = get_local_ip(skb->dev);
         if (INADDR_LOOPBACK == ip_header->daddr) {
-            printk(KERN_ERR "%s (skb=%p): dest addr from server is INADDR_LOOPBACK\n", __func__, skb);
+            printk(KERN_ERR "%s (skb=%s): dest addr from server is INADDR_LOOPBACK\n", __func__, SKB_str(skb));
             /* XXX: log? */
         }
         tcp_header->dest = entry->server_proxy->proxy_port;
@@ -608,4 +608,20 @@ CONNECTION_ENTRY_destroy(connection_entry_t *entry)
     }
 
     KFREE_SAFE(entry);
+}
+
+char g_skb_string_buff[1024];
+
+const char *
+SKB_str(const struct sk_buff *skb)
+{
+    struct iphdr *ip_header = ip_hdr(skb);
+    struct tcphdr *tcp_header = tcp_hdr(skb);
+    snprintf(g_skb_string_buff, sizeof(g_skb_string_buff),
+            "0x%.8x:%d->0x%.8x:%d (S=%d,A=%d,R=%d,F=%d)",
+            ntohl(ip_header->saddr), ntohs(tcp_header->source),
+            ntohl(ip_header->daddr), ntohs(tcp_header->dest),
+            tcp_header->syn, tcp_header->ack,
+            tcp_header->rst, tcp_header->fin);
+    return g_skb_string_buff;
 }

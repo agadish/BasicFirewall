@@ -124,6 +124,9 @@ CONNECTION_ENTRY_create_from_syn(connection_entry_t **entry_out,
 void
 CONNECTION_ENTRY_destroy(connection_entry_t *entry);
 
+const char *
+SKB_str(const struct sk_buff *skb);
+
 
 #endif /* __CONNECTION_ENTRY_H__ */
 
