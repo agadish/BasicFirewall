@@ -128,6 +128,15 @@ proxy_entry_get_conn_by_cmp(proxy_connection_entry_t *entry,
                       single_connection_t **src_out,
                       single_connection_t **dst_out);
 
+static void
+conn_init_by_skb(connection_t *conn,
+                 const struct sk_buff *skb);
+
+
+static void
+conn_init_by_inverse_conn(connection_t *conn,
+                          const connection_t *inverse_conn);
+
 
 /*   G L O B A L S   */
 connection_entry_vtbl_t g_vtable_connection_direct = {
@@ -221,14 +230,14 @@ l_cleanup:
 }
 
 static void
-entry_init_by_skb(connection_entry_t *entry,
-                  const struct sk_buff *skb)
+conn_init_by_skb(connection_t *conn,
+                 const struct sk_buff *skb)
 {
     struct iphdr *ip_header = NULL;
     struct tcphdr *tcp_header = NULL;
 
     /* 0. Input validation */
-    if ((NULL == entry) || (NULL == skb)) {
+    if ((NULL == conn) || (NULL == skb)) {
         goto l_cleanup;
     }
 
@@ -236,35 +245,56 @@ entry_init_by_skb(connection_entry_t *entry,
     ip_header = ip_hdr(skb);
     tcp_header = tcp_hdr(skb);
 
-    entry->conn->opener.id.src_ip = ip_header->saddr;
-    entry->conn->opener.id.dst_ip = ip_header->daddr;
-    entry->conn->opener.id.src_port = tcp_header->source;
-    entry->conn->opener.id.dst_port = tcp_header->dest;
+    conn->opener.id.src_ip = ip_header->saddr;
+    conn->opener.id.dst_ip = ip_header->daddr;
+    conn->opener.id.src_port = tcp_header->source;
+    conn->opener.id.dst_port = tcp_header->dest;
 
-    connection_id_flip(&entry->conn->listener.id, &entry->conn->opener.id);
+    connection_id_flip(&conn->listener.id, &conn->opener.id);
 
     /* 2. State initialiation */
-    entry->conn->opener.state = TCP_CLOSE;
-    entry->conn->listener.state = TCP_CLOSE;
+    conn->opener.state = TCP_CLOSE;
+    conn->listener.state = TCP_CLOSE;
 
 l_cleanup:
     return;
 }
 
 static void
+conn_init_by_inverse_conn(connection_t *conn,
+                          const connection_t *inverse_conn)
+{
+    (void)memcpy(&conn->opener, &inverse_conn->listener, sizeof(conn->opener));
+    (void)memcpy(&conn->listener, &inverse_conn->opener, sizeof(conn->opener));
+}
+
+static void
+entry_init_by_skb(connection_entry_t *entry,
+                  const struct sk_buff *skb)
+{
+    conn_init_by_skb(entry->conn, skb);
+}
+
+static void
 proxy_entry_init_by_skb(proxy_connection_entry_t *entry,
                         const struct sk_buff *skb)
 {
+    struct tcphdr *tcp_header = NULL;
+
     /* 0. Input validation */
     if ((NULL == entry) || (NULL == skb)) {
         goto l_cleanup;
     }
 
-    /* 1. Call super function */
-    entry_init_by_skb((connection_entry_t *)entry, skb);
+    tcp_header = tcp_hdr(skb);
 
-    /* 2. Init proxy port */
-    proxy_init_proxy_ports(entry, tcp_hdr(skb)->dest);
+    /* 1. Init connections */
+    conn_init_by_skb((connection_t *)entry->client_conn, skb);
+    conn_init_by_inverse_conn((connection_t *)entry->server_conn,
+                              (connection_t *)entry->client_conn);
+
+    /* 2. Proxy ports */
+    proxy_init_proxy_ports(entry, tcp_header->dest);
 
 l_cleanup:
     return;
@@ -344,12 +374,12 @@ proxy_init_proxy_ports(proxy_connection_entry_t *entry,
         case HTTP_PORT_N:
             printk(KERN_INFO "%s: hello port 80\n", __func__);
             entry->client_conn->proxy_port = HTTP_USER_PORT_N;
-            entry->client_conn->proxy_port = 0; /* Will be set later */
+            entry->server_conn->proxy_port = 0; /* Will be set later */
             break;
         case FTP_PORT_N:
             printk(KERN_INFO "%s: hello port 21\n", __func__);
             entry->client_conn->proxy_port = FTP_USER_PORT_N;
-            entry->client_conn->proxy_port = 0; /* Will be set later */
+            entry->server_conn->proxy_port = 0; /* Will be set later */
             break;
         default:
             printk(KERN_ERR "%s: got port that is not HTTP/FTP: %d\n", __func__, ntohs(port_n));
