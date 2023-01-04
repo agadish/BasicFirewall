@@ -53,7 +53,7 @@ proxy_entry_packet_hook(connection_entry_t *entry,
                           struct sk_buff *skb);
 
 static uint32_t
-get_local_ip(struct net_device *dev);
+get_local_ip__network_order(struct net_device *dev);
 
 static entry_cmp_result_t
 entry_compare_packet(connection_entry_t *entry,
@@ -331,11 +331,17 @@ proxy_init_proxy_ports(connection_entry_t *entry,
 /* } */
 
 static uint32_t
-get_local_ip(struct net_device *dev)
+get_local_ip__network_order(struct net_device *dev)
 {
-    uint32_t result = INADDR_LOOPBACK;
+    uint32_t result = 0;
     struct in_device *in_dev = NULL;
     struct in_ifaddr *ifa = NULL;
+
+    if (NULL == dev) {
+        printk(KERN_ERR "%s: got NULL - returning 0\n", __func__);
+        result = 0;
+        goto l_cleanup;
+    }
 
     in_dev = (struct in_device *)dev->ip_ptr;
     if (NULL != in_dev) {
@@ -349,6 +355,8 @@ get_local_ip(struct net_device *dev)
         printk(KERN_ERR "%s: device doesn't have an IP\n", __func__);
     }
 
+
+l_cleanup:
 
     return result;
 }
@@ -396,16 +404,21 @@ proxy_entry_compare_packet(connection_entry_t *entry,
 
     ip_header = ip_hdr(skb);
     tcp_header = tcp_hdr(skb);
+    printk(KERN_INFO "%s (skb %s): checking...\n", __func__, SKB_str(skb));
     if (does_connection_id_match_skb(&entry->client->id, skb)) {
+        printk(KERN_INFO "%s: client to proxy\n", __func__);
         /* Client to proxy */
         result = ENTRY_CMP_FROM_CLIENT;
     } else if (does_connection_id_match_skb(&entry->server->id, skb)) {
+        printk(KERN_INFO "%s: server to proxy\n", __func__);
         /* Server to proxy */
         result = ENTRY_CMP_FROM_SERVER;
     } else if (does_proxy_connection_match_skb(entry->client_proxy, skb)) {
+        printk(KERN_INFO "%s: proxy to client\n", __func__);
         /* Proxy to client */
         result = ENTRY_CMP_TO_CLIENT;
     } else if (does_proxy_connection_match_skb(entry->server_proxy, skb)) {
+        printk(KERN_INFO "%s: proxy to server\n", __func__);
         /* Proxy to server */
         result = ENTRY_CMP_TO_SERVER;
     }
@@ -442,15 +455,37 @@ does_proxy_connection_match_skb(proxy_connection_t *proxy_conn,
     bool_t does_match = FALSE;
     struct iphdr *ip_header = ip_hdr(skb);
     struct tcphdr *tcp_header = tcp_hdr(skb);
-    uint32_t local_ip = get_local_ip(skb->dev);
+    uint32_t local_ip = get_local_ip__network_order(skb->dev);
+    bool_t is_src_ip_from_localhost = FALSE;
+    bool_t is_src_port_match = FALSE;
+    bool_t is_src_port_misconfigured = FALSE;
+    bool_t is_dst_ip_match = FALSE;
+    bool_t is_dst_port_match = FALSE;
 
-    if ((ip_header->saddr == local_ip) &&
-        ((0 == proxy_conn->proxy_port) || (tcp_header->source == proxy_conn->proxy_port)) &&
-        (ip_header->daddr == proxy_conn->base.id.dst_ip) &&
-        (tcp_header->dest == proxy_conn->base.id.dst_port))
-    {
-        does_match = TRUE;
+    /* Note: On LOCAL-OUT hook, we get the skb->dev to be NULL so the soruce IP
+     *       is not set correctly. We will treat it as zero */
+    is_src_ip_from_localhost = (0 == local_ip);
+    is_src_port_match = tcp_header->source == proxy_conn->proxy_port;
+    is_src_port_misconfigured = ((0 == proxy_conn->proxy_port) &&
+                                 (TCP_CLOSE == proxy_conn->base.state));
+    is_dst_ip_match = (ip_header->daddr == proxy_conn->base.id.src_ip);
+    is_dst_port_match = (tcp_header->dest == proxy_conn->base.id.src_port);
+
+    if (!is_src_port_misconfigured && (0 == proxy_conn->proxy_port)) {
+        printk(KERN_INFO "%s (skb=%s): source misconfigured problem: got port 0 but state is %d\n",
+                __func__, SKB_str(skb), proxy_conn->base.state);
     }
+
+    does_match = (is_src_ip_from_localhost &&
+                  (is_src_port_match || is_src_port_misconfigured) &&
+                  is_dst_ip_match &&
+                  is_dst_port_match) ? TRUE : FALSE;
+    printk(KERN_INFO "%s (skb=%s): local_ip=0x%.8x, proxy: proxy_port=%d, 0x%.8x:%d->0x%.8x:%d. results: %d %d %d %d %d -> %d\n",
+            __func__, SKB_str(skb), local_ip, ntohs(proxy_conn->proxy_port),
+            ntohl(proxy_conn->base.id.src_ip), ntohs(proxy_conn->base.id.src_port),
+            ntohl(proxy_conn->base.id.dst_ip), ntohs(proxy_conn->base.id.dst_port),
+            is_src_ip_from_localhost, is_src_port_match,
+            is_src_port_misconfigured, is_dst_ip_match, is_dst_port_match, does_match);
 
     return does_match;
 }
@@ -478,9 +513,9 @@ proxy_entry_packet_hook(connection_entry_t *entry,
     switch (cmp_result) 
     {
     case ENTRY_CMP_FROM_CLIENT:
-        ip_header->daddr = get_local_ip(skb->dev);
-        if (INADDR_LOOPBACK == ip_header->daddr) {
-            printk(KERN_ERR "%s (skb=%s): dest addr from clientis INADDR_LOOPBACK\n", __func__, SKB_str(skb));
+        ip_header->daddr = get_local_ip__network_order(skb->dev);
+        if (0 == ip_header->daddr) {
+            printk(KERN_ERR "%s (skb=%s): dest addr from clientis 0\n", __func__, SKB_str(skb));
             /* XXX: log? */
         }
         tcp_header->dest = entry->client_proxy->proxy_port;
@@ -488,9 +523,9 @@ proxy_entry_packet_hook(connection_entry_t *entry,
                 ntohl(ip_header->daddr), ntohs(tcp_header->dest));
         break;
     case ENTRY_CMP_FROM_SERVER:
-        ip_header->daddr = get_local_ip(skb->dev);
-        if (INADDR_LOOPBACK == ip_header->daddr) {
-            printk(KERN_ERR "%s (skb=%s): dest addr from server is INADDR_LOOPBACK\n", __func__, SKB_str(skb));
+        ip_header->daddr = get_local_ip__network_order(skb->dev);
+        if (0 == ip_header->daddr) {
+            printk(KERN_ERR "%s (skb=%s): dest addr from server is 0\n", __func__, SKB_str(skb));
             /* XXX: log? */
         }
         tcp_header->dest = entry->server_proxy->proxy_port;
@@ -519,6 +554,7 @@ proxy_entry_packet_hook(connection_entry_t *entry,
         break;
     case ENTRY_CMP_MISMATCH:
     default:
+        printk(KERN_INFO "%s (skb=%s): was not modified\n", __func__, SKB_str(skb));
         was_modified = FALSE;
         break;
 
@@ -618,10 +654,12 @@ SKB_str(const struct sk_buff *skb)
     struct iphdr *ip_header = ip_hdr(skb);
     struct tcphdr *tcp_header = tcp_hdr(skb);
     snprintf(g_skb_string_buff, sizeof(g_skb_string_buff),
-            "0x%.8x:%d->0x%.8x:%d (S=%d,A=%d,R=%d,F=%d)",
+            "0x%.8x:%d->0x%.8x:%d (S=%d,A=%d,R=%d,F=%d, dev=%s)",
             ntohl(ip_header->saddr), ntohs(tcp_header->source),
             ntohl(ip_header->daddr), ntohs(tcp_header->dest),
             tcp_header->syn, tcp_header->ack,
-            tcp_header->rst, tcp_header->fin);
+            tcp_header->rst, tcp_header->fin,
+            (NULL == skb->dev) ? "NULL" : skb->dev->name
+            );
     return g_skb_string_buff;
 }

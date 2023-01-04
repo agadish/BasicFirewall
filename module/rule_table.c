@@ -341,6 +341,7 @@ RULE_TABLE_check(const rule_table_t *table,
     }
 
     if (0 == strncmp(skb->dev->name, DEBUG_INTERFACE, sizeof(skb->dev->name))) {
+        printk(KERN_INFO "packet from debug interface, bye\n");
         does_match = TRUE;
         *action_out = NF_ACCEPT;
         *reason_out = -16;
@@ -408,6 +409,11 @@ get_packet_direction(const struct sk_buff *skb)
     char *iface_name = skb->dev->name;
     size_t name_length = ARRAY_SIZE(skb->dev->name);
 
+    if (NULL == iface_name) {
+        /* Localhost */
+        direction = DIRECTION_ANY; 
+        printk(KERN_ERR "%s: direciton any for skb=%s\n", __func__, SKB_str(skb));
+    }
     if (0 == strncmp(iface_name, IN_INTERFACE, name_length)) {
         direction = DIRECTION_IN;
     } else if (0 == strncmp(iface_name, OUT_INTERFACE, name_length)) {

@@ -184,15 +184,17 @@ tcp_machine_state(connection_table_t *table,
     switch (cmp_result)
     {
     case ENTRY_CMP_FROM_CLIENT:
-    case ENTRY_CMP_TO_SERVER:
         sender = entry->client;
         receiver = entry->server;
         break;
     case ENTRY_CMP_FROM_SERVER:
-    case ENTRY_CMP_TO_CLIENT:
         sender = entry->server;
         receiver = entry->client;
         break;
+        /* Proxy local out */
+    case ENTRY_CMP_TO_SERVER:
+    case ENTRY_CMP_TO_CLIENT:
+        goto l_cleanup;
     case ENTRY_CMP_MISMATCH:
     default:
         printk(KERN_ERR "%s (skb=%s): given entry %p doesn't match\n", __func__, SKB_str(skb), entry);
@@ -344,6 +346,7 @@ CONNECTION_TABLE_track_local_out(connection_table_t *table,
     /* Note: For SYN packets it won't match, and the handling will be done here...
      *       Unless, a connection exists for this SYN packet, and it will be handled accordingly */
     cmp_result = search_entry(&table->list, skb, &entry);
+    printk(KERN_INFO "%s (skb=%s): search_entry returned %d\n", __func__, SKB_str(skb), cmp_result);
     if (ENTRY_CMP_MISMATCH == cmp_result) {
         /* printk(KERN_INFO "%s (skb=%s): no entry for 0x%.8x:0x%.4x -> 0x%.8x->0x%.4x\n", __func__, SKB_str(skb), ip_hdr(skb)->saddr, tcp_hdr(skb)->source, ip_hdr(skb)->daddr, tcp_hdr(skb)->dest); */
         goto l_cleanup;
@@ -381,7 +384,7 @@ CONNECTION_TABLE_check(connection_table_t *table,
         goto l_cleanup;
     }
 
-    /* 1. Filter non_TCP packets */
+    /* 1. Filter non-TCP packets */
     if (htons(ETH_P_IP) != skb->protocol) {
 
         printk(KERN_ERR "%s: skb is not ip!\n", __func__);
@@ -399,12 +402,19 @@ CONNECTION_TABLE_check(connection_table_t *table,
     /* Note: For SYN packets it won't match, and the handling will be done here...
      *       Unless, a connection exists for this SYN packet, and it will be handled accordingly */
     cmp_result = search_entry(&table->list, skb, &entry);
+    printk(KERN_INFO "%s (skb=%s): search_entry returned %d\n", __func__, SKB_str(skb), cmp_result);
     if (ENTRY_CMP_MISMATCH == cmp_result) {
         printk(KERN_INFO "%s (skb=%s): no entry\n", __func__, SKB_str(skb));
         goto l_cleanup;
     }
+    if (ENTRY_CMP_TO_SERVER == cmp_result) {
+        goto l_cleanup;
+    }
 
     is_legal_traffic = tcp_machine_state(table, skb, entry, cmp_result);
+    if (ENTRY_CMP_TO_SERVER == cmp_result) {
+        goto l_cleanup;
+    }
     /* 3. Check if the traffic is legal, drop illegal traffic */
     if (is_legal_traffic) {
         *action_out = NF_ACCEPT;
@@ -420,6 +430,7 @@ CONNECTION_TABLE_check(connection_table_t *table,
 
     /* 6. Call the hook */
     CONNECTION_ENTRY_hook(entry, skb);
+    printk(KERN_INFO "%s (skb %s): called hook\n", __func__, SKB_str(skb));
 
 l_cleanup:
 

@@ -384,10 +384,10 @@ hw4secws_hookfn_local_out(
         } else {
             printk(KERN_ERR "%s: outgoing packet without SYN nor connection table entry! syn%d ack%d fin%d rst%d\n", __func__, tcp_hdr(skb)->syn, tcp_hdr(skb)->ack, tcp_hdr(skb)->fin, tcp_hdr(skb)->rst);
             action = NF_DROP;
+            goto l_cleanup;
         }
     }
 
-    goto l_cleanup;
 l_cleanup:
 
     return (unsigned int)action;
@@ -435,12 +435,14 @@ hw4secws_hookfn_pre_routing(
                 reason = REASON_NO_MATCHING_RULE;
                 goto l_cleanup;
             }
+            printk(KERN_INFO "%s: has rule match\n", __func__);
             /* Note: If we reach here it must be a TCP syn */
             /* 5. Matching rule - should bes SYN, update connection table */
             if (IPPROTO_TCP == ip_hdr(skb)->protocol) {
                 /* For sure it has syn */
                 if ((tcp_hdr(skb)->syn) && (!tcp_hdr(skb)->ack)) {
                     /* Ignore failure */
+                    printk(KERN_INFO "%s: handling accpeted syn\n", __func__);
                     (void)CONNECTION_TABLE_handle_accepted_syn(g_connection_table, skb);
                     /* 6. Check the connection table once again - after inserting new rule */
                     printk(KERN_INFO "%s: CONNECTION_TABLE_check for skb=%s first syn\n", __func__, SKB_str(skb));
@@ -457,9 +459,11 @@ hw4secws_hookfn_pre_routing(
     }
 
 l_cleanup:
+    printk(KERN_INFO "%s (skb=%s): finished handling, action %d reason %d\n", __func__, SKB_str(skb), action, reason);
     /* 3. Log the packet with the action to the reason */
     /* Note: we have nothing to do with logging failure */
     if (should_log) {
+        printk(KERN_INFO "%s (skb=%s): logging\n", __func__, SKB_str(skb));
         (void)FW_LOG_log_match(skb, action, reason);
     }
 

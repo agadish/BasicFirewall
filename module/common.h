@@ -28,4 +28,9 @@
 typedef uint8_t bool_t;
 
 
+/*   F U N C T I O N S   D E C L A R A T I O N S   */
+const char *
+SKB_str(const struct sk_buff *skb);
+
+
 #endif /* __COMMON_H__ */
