@@ -24,13 +24,18 @@
 
 /*   M A C R O S   */
 #define _ENTRY_VTBL(entry) (((connection_entry_t *)(entry))->_vtbl)
-#define CONNECTION_ENTRY_init_by_skb(entry, skb) (_ENTRY_VTBL((entry))->init_by_skb((entry), (skb)))
+#define CONNECTION_ENTRY_init_by_skb(entry, skb) (_ENTRY_VTBL((entry))->init_by_skb((connection_entry_t *)(entry), (skb)))
+#define CONNECTION_ENTRY_destroy(entry) (_ENTRY_VTBL((entry))->destroy((connection_entry_t *)(entry)))
 // #define CONNECTION_ENTRY_init_by_id(entry, id) (_ENTRY_VTBL((entry))->init_by_id((entry), (id)))
-#define CONNECTION_ENTRY_hook(entry, skb) (_ENTRY_VTBL((entry))->hook((entry), (skb)))
-#define CONNECTION_ENTRY_compare(entry, skb) (_ENTRY_VTBL((entry))->compare((entry), (skb)))
+#define CONNECTION_ENTRY_hook(entry, skb) (_ENTRY_VTBL((entry))->hook((connection_entry_t *)(entry), (skb)))
+#define CONNECTION_ENTRY_compare(entry, skb) (_ENTRY_VTBL((entry))->compare((connection_entry_t *)(entry), (skb)))
 #define CONNECTION_ENTRY_connection_alloc(conn_out) (_ENTRY_VTBL((entry))->connection_alloc(conn_out))
-#define IS_PROXY_ENTRY(entry) (CONNECTION_TYPE_PROXY == _ENTRY_VTBL((entry))->type)
+#define CONNECTION_ENTRY_dump(entry, buf, buflen) (_ENTRY_VTBL((entry))->dump((connection_entry_t *)(entry), (buf), (buflen)))
 
+#define IS_PROXY_ENTRY(entry) (CONNECTION_TYPE_PROXY == _ENTRY_VTBL((entry))->type)
+#define CONNECTION_ENTRY_get_conn_by_cmp(entry, cmp_res, src_out, dst_out) (_ENTRY_VTBL((entry))->get_conn_by_cmp((entry), (cmp_res), (src_out), (dst_out)))
+
+#define CMP_IS_SERVER_TO_CLIENT(cmp) ((ENTRY_CMP_FROM_SERVER == (cmp)) || (ENTRY_CMP_TO_CLIENT == (cmp)))
 
 /*   E N U M S   */
 typedef enum connection_type_e {
@@ -48,11 +53,15 @@ typedef enum entry_cmp_result_e {
 
 
 /*   T Y P E D E F S   */
-typedef struct connection_entry_s connection_entry_t;
-typedef struct connection_id_s connection_id_t;
 typedef struct connection_s connection_t;
+typedef struct proxy_connection_s proxy_connection_t;
+typedef struct connection_id_s connection_id_t;
+typedef struct single_connection_s single_connection_t;
+typedef struct connection_entry_s connection_entry_t;
+typedef struct proxy_connection_entry_s proxy_connection_entry_t;
 typedef void (*entry_init_by_skb_f)(connection_entry_t *entry,
                                     const struct sk_buff *skb);
+typedef void (*entry_destroy_f)(connection_entry_t *entry);
 // typedef void (*entry_init_by_id_f)(connection_entry_t *entry,
 //                                    const connection_id_t *id);
 
@@ -61,8 +70,15 @@ typedef void (*entry_hook_f)(connection_entry_t *conn,
 
 typedef entry_cmp_result_t (*entry_compare_f)(connection_entry_t *conn,
                                               const struct sk_buff *skb);
+typedef bool_t (*get_conn_by_cmp_f)(connection_entry_t *entry,
+                                    entry_cmp_result_t cmp_res,
+                                    single_connection_t **src_out,
+                                    single_connection_t **dst_out);
 
 typedef result_t (*connection_alloc_f)(connection_t **conn_out);
+typedef size_t (*dump_entry_f)(const connection_entry_t *entry,
+                             uint8_t *buffer,
+                             size_t buffer_size);
 
 
 /*   S T R U C T S   */
@@ -73,6 +89,9 @@ typedef struct connection_entry_vtbl_s {
     // entry_init_by_id_f init_by_id;
     entry_hook_f hook;
     entry_compare_f compare;
+    dump_entry_f dump;
+    get_conn_by_cmp_f get_conn_by_cmp;
+    entry_destroy_f destroy;
 } connection_entry_vtbl_t;
 
 #pragma pack(1)
@@ -84,28 +103,35 @@ struct connection_id_s {
 };
 
 #pragma pack(1)
-struct connection_s {
+struct single_connection_s {
     connection_id_t id;
     __u8 state;
 };
 
 #pragma pack(1)
+typedef struct connection_s {
+    single_connection_t opener;
+    single_connection_t listener;
+} connection_t;
+
+#pragma pack(1)
 typedef struct proxy_connection_s {
-    connection_t base;
+    single_connection_t opener;
+    single_connection_t listener;
     __u16 proxy_port;
 } proxy_connection_t;
 
 struct connection_entry_s {
     struct klist_node node;
     connection_entry_vtbl_t *_vtbl;
-    union {
-        connection_t *client;
-        proxy_connection_t *client_proxy;
-    };
-    union {
-        connection_t *server;
-        proxy_connection_t *server_proxy;
-    };
+    connection_t *conn;
+};
+
+struct proxy_connection_entry_s {
+    struct klist_node node;
+    connection_entry_vtbl_t *_vtbl;
+    proxy_connection_t *client_conn;
+    proxy_connection_t *server_conn;
 };
 
 
@@ -121,8 +147,6 @@ extern connection_entry_vtbl_t g_vtable_connection_proxy;
 result_t
 CONNECTION_ENTRY_create_from_syn(connection_entry_t **entry_out,
                                   const struct sk_buff *skb);
-void
-CONNECTION_ENTRY_destroy(connection_entry_t *entry);
 
 
 #endif /* __CONNECTION_ENTRY_H__ */

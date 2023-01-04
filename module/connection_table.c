@@ -39,10 +39,10 @@ static bool_t
 is_syn_packet(const struct tcphdr *tcp_header);
 
 static bool_t
-tcp_machine_state(connection_table_t *table,
+tcp_machine_state(single_connection_t *sender,
+                  single_connection_t *receiver,
                   const struct sk_buff *skb,
-                  connection_entry_t *entry,
-                  entry_cmp_result_t cmp_result);
+                  bool_t *is_removed_out);
 
 static entry_cmp_result_t
 search_entry(struct klist *entries_list,
@@ -126,9 +126,9 @@ CONNECTION_TABLE_dump_data(const connection_table_t *table,
 {
     bool_t result = FALSE;
     struct klist_iter list_iter = {0};
-    const connection_entry_t *node = NULL;
-    const size_t entry_dump_size = sizeof(*node->client) + sizeof(*node->server);
+    const connection_entry_t *entry = NULL;
     size_t remaining_length = 0;
+    size_t current_length = 0;
     size_t current_index = 0;
 
     if ((NULL == table) || (NULL == buffer) || (NULL == buffer_size_inout)) {
@@ -141,75 +141,53 @@ CONNECTION_TABLE_dump_data(const connection_table_t *table,
     klist_iter_init((struct klist *)&table->list, &list_iter);
 
     printk(KERN_INFO "%s: enter, buffer size %lu\n", __func__, (unsigned long)remaining_length);
-    while (remaining_length > entry_dump_size) {
+    while (remaining_length > 0) {
         /* 1. Get next chunk  */
-        node = (connection_entry_t *)klist_next(&list_iter); 
-        printk(KERN_INFO "%s: node scanned 0x%.8x\n", __func__, (uint32_t)node);
+        entry = (connection_entry_t *)klist_next(&list_iter); 
+        printk(KERN_INFO "%s: entry scanned 0x%.8x\n", __func__, (uint32_t)entry);
         /* 2. Last chunk? break */
-        if (NULL == node) {
+        if (NULL == entry) {
+            result = TRUE;
             break;
         }
 
-        /* printk(KERN_INFO "%s: copying an entry 0x%.8x:0x%.4x -> 0x%.8x->0x%.4x\n", __func__, node->conn.id.src_ip, node->conn.id.src_port, node->conn.id.dst_ip, node->conn.id.dst_port); */
-        (void)memcpy(&buffer[current_index], node->client, sizeof(*node->client));
-        current_index += sizeof(*node->client);
-        (void)memcpy(&buffer[current_index], node->server, sizeof(*node->server));
-        current_index += sizeof(*node->server);
-
-        remaining_length -= entry_dump_size;
+        current_length = CONNECTION_ENTRY_dump(entry,
+                                               &buffer[current_index],
+                                               remaining_length);
+        if (0 == current_length) {
+            break;
+        }
+        current_index += current_length;
+        remaining_length -= current_length;
     }
 
     klist_iter_exit(&list_iter);
 
     *buffer_size_inout = current_index;
 
-    result = TRUE;
 l_cleanup:
 
     return result;
 }
 
 static bool_t
-tcp_machine_state(connection_table_t *table,
+tcp_machine_state(single_connection_t *sender,
+                  single_connection_t *receiver,
                   const struct sk_buff *skb,
-                  connection_entry_t *entry,
-                  entry_cmp_result_t cmp_result)
+                  bool_t *is_removed_out)
 {
     bool_t is_legal_traffic = TRUE;
     struct tcphdr *tcp_header = tcp_hdr(skb);
-    connection_t *sender = NULL;
-    connection_t *receiver = NULL;
 
-    /* 1. Initialize sender and receiver */
-    switch (cmp_result)
-    {
-    case ENTRY_CMP_FROM_CLIENT:
-        sender = entry->client;
-        receiver = entry->server;
-        break;
-    case ENTRY_CMP_FROM_SERVER:
-        sender = entry->server;
-        receiver = entry->client;
-        break;
-        /* Proxy local out */
-    case ENTRY_CMP_TO_SERVER:
-    case ENTRY_CMP_TO_CLIENT:
-        goto l_cleanup;
-    case ENTRY_CMP_MISMATCH:
-    default:
-        printk(KERN_ERR "%s (skb=%s): given entry %p doesn't match\n", __func__, SKB_str(skb), entry);
-        is_legal_traffic = FALSE;
-        goto l_cleanup;
-    }
-
-    /* 2. Check RST */
+    /* 1. Check RST */
     if (tcp_header->rst) {
-        remove_entry(entry);
+        *is_removed_out = TRUE;
         goto l_cleanup;
     }
+    *is_removed_out = FALSE;
 
     /* printk(KERN_INFO "%s (skb=%s): hello\n", __func__, SKB_str(skb)); */
-    /* 3. Handle TCP state machine */
+    /* 2. Handle TCP state machine */
     printk(KERN_INFO "%s (skb=%s): state %d\n", __func__, SKB_str(skb), sender->state);
     switch (sender->state)
     {
@@ -307,7 +285,7 @@ tcp_machine_state(connection_table_t *table,
     case TCP_LAST_ACK:
     case TCP_TIME_WAIT:
         /* printk(KERN_INFO "%s (skb=%s): state %d discarding\n", __func__, SKB_str(skb), sender->state); */
-        remove_entry(entry);
+        *is_removed_out = TRUE;
         break;
     case TCP_CLOSE_WAIT:
         if (tcp_header->ack) {
@@ -377,6 +355,10 @@ CONNECTION_TABLE_check(connection_table_t *table,
     entry_cmp_result_t cmp_result = ENTRY_CMP_MISMATCH;
     bool_t is_legal_traffic = TRUE;
     connection_entry_t *entry = NULL;
+    single_connection_t *conn_sender = NULL;
+    single_connection_t *conn_receiver = NULL;
+    bool_t result_get_conn = FALSE;
+    bool_t is_removed = FALSE;
 
     /* 0. Input validation */
     if ((NULL == table) || (NULL == skb) || (NULL == action_out) || (NULL == reason_out)) {
@@ -408,15 +390,27 @@ CONNECTION_TABLE_check(connection_table_t *table,
         goto l_cleanup;
     }
 
-    is_legal_traffic = tcp_machine_state(table, skb, entry, cmp_result);
-    if (ENTRY_CMP_TO_SERVER == cmp_result) {
+    /* 3. Get sender and receiver */
+    result_get_conn = CONNECTION_ENTRY_get_conn_by_cmp(entry, cmp_result, &conn_sender, &conn_receiver);
+    if (!result_get_conn) {
+        printk(KERN_INFO "%s (skb=%s): invalid get conn\n", __func__, SKB_str(skb));
+        remove_entry(entry);
+        *action_out = NF_DROP;
+        *reason_out = REASON_ILLEGAL_VALUE;
         goto l_cleanup;
     }
+
+    /* 4. Handle TCP state machine */
+    is_legal_traffic = tcp_machine_state(conn_sender, conn_receiver, skb, &is_removed);
     /* 3. Check if the traffic is legal, drop illegal traffic */
     if (is_legal_traffic) {
         *action_out = NF_ACCEPT;
         /* TODO: Don't log */
         *reason_out = 0;
+        if (is_removed) {
+            printk(KERN_INFO "%s (skb=%s): got rst, removing entry\n", __func__, SKB_str(skb));
+            remove_entry(entry);
+        }
     } if (!is_legal_traffic) {
         /* Drop the entry */
         remove_entry(entry);

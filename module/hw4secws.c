@@ -203,8 +203,8 @@ conns_display(struct device *dev, struct device_attribute *attr, char *buf);
  *
  * @return Number of bytes were read, or negative value on error
  */
-static ssize_t
-proxy_conns_assign(struct device *dev, struct device_attribute *attr, const char *buf, size_t count);
+/* static ssize_t */
+/* proxy_conns_assign(struct device *dev, struct device_attribute *attr, const char *buf, size_t count); */
 
 
 /**
@@ -311,7 +311,7 @@ static struct class *g_hw4secws_class = NULL;
 static struct device *g_sysfs_log_device = NULL;
 static struct device *g_sysfs_rules_device = NULL;
 static struct device *g_sysfs_conns_device = NULL;
-static struct device *g_sysfs_proxy_conns_device = NULL;
+/* static struct device *g_sysfs_proxy_conns_device = NULL; */
 static bool_t g_has_sysfs_rules_device = FALSE;
 static bool_t g_has_sysfs_log_device = FALSE;
 static bool_t g_has_sysfs_conns_device = FALSE;
@@ -330,7 +330,7 @@ static DEVICE_ATTR(reset, S_IWUSR, NULL, log_modify);
 /* connecion table file */
 static DEVICE_ATTR(conns, S_IRUGO, conns_display, NULL); 
 /* proxy connecion table file */
-static DEVICE_ATTR(proxy_conns, S_IWUSR | S_IRUGO, NULL, proxy_conns_assign); 
+/* static DEVICE_ATTR(proxy_conns, S_IWUSR | S_IRUGO, NULL, proxy_conns_assign);  */
 
 
 /*   F U N C T I O N S    I M P L E M E N T A T I O N S   */
@@ -657,15 +657,15 @@ init_conns_driver(void)
         goto l_cleanup;
     }
 
-    /* 3.1. Proxy conns - write */
-    result_device_create_file = device_create_file(
-        g_sysfs_proxy_conns_device,
-        (const struct device_attribute *)&dev_attr_proxy_conns.attr
-    );
-    if (0 != result_device_create_file) {
-        result = -1;
-        goto l_cleanup;
-    }
+    /* [> 3.1. Proxy conns - write <] */
+    /* result_device_create_file = device_create_file( */
+    /*     g_sysfs_proxy_conns_device, */
+    /*     (const struct device_attribute *)&dev_attr_proxy_conns.attr */
+    /* ); */
+    /* if (0 != result_device_create_file) { */
+    /*     result = -1; */
+    /*     goto l_cleanup; */
+    /* } */
 
     result = 0;
 l_cleanup:
@@ -759,11 +759,11 @@ clean_rules_driver(void)
 static void
 clean_conns_driver(void)
 {
-    if (NULL != g_sysfs_proxy_conns_device) {
-        device_remove_file(g_sysfs_proxy_conns_device,
-                           (const struct device_attribute *)&dev_attr_conns.attr);
-        g_sysfs_proxy_conns_device = NULL;
-    }
+    /* if (NULL != g_sysfs_proxy_conns_device) { */
+    /*     device_remove_file(g_sysfs_proxy_conns_device, */
+    /*                        (const struct device_attribute *)&dev_attr_conns.attr); */
+    /*     g_sysfs_proxy_conns_device = NULL; */
+    /* } */
 
     if (NULL != g_sysfs_conns_device) {
         device_remove_file(g_sysfs_conns_device, (const struct device_attribute *)&dev_attr_conns.attr);
@@ -866,34 +866,34 @@ rules_modify(struct device *dev, struct device_attribute *attr, const char *buf,
     return result;
 }
 
-static ssize_t
-proxy_conns_assign(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
-{
-    ssize_t result = 0;
-    proxy_connection_t proxy_conn = {0};
-    unsigned long result_copy_from_user = 0;
-
-    if (sizeof(proxy_conn) > count) {
-        goto l_cleanup;
-    }
-
-    /* 1. Copy proxy details */
-    result_copy_from_user = copy_from_user(&proxy_conn, buf, count);
-    if (0 != result_copy_from_user) {
-        printk(KERN_ERR "%s: could not copy %d bytes from user\n", __func__, sizeof(proxy_conn));
-        result = -EINVAL;
-        goto l_cleanup;
-    }
-
-    if ('0' == buf[0]) {
-        FW_LOG_reset_logs();
-        result = count;
-    }
-
-l_cleanup:
-
-    return result;
-}
+/* static ssize_t */
+/* proxy_conns_assign(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) */
+/* { */
+/*     ssize_t result = 0; */
+/*     proxy_biconnection_t proxy_conn = {0}; */
+/*     unsigned long result_copy_from_user = 0; */
+/*  */
+/*     if (sizeof(proxy_conn) > count) { */
+/*         goto l_cleanup; */
+/*     } */
+/*  */
+/*     [> 1. Copy proxy details <] */
+/*     result_copy_from_user = copy_from_user(&proxy_conn, buf, count); */
+/*     if (0 != result_copy_from_user) { */
+/*         printk(KERN_ERR "%s: could not copy %d bytes from user\n", __func__, sizeof(proxy_conn)); */
+/*         result = -EINVAL; */
+/*         goto l_cleanup; */
+/*     } */
+/*  */
+/*     if ('0' == buf[0]) { */
+/*         FW_LOG_reset_logs(); */
+/*         result = count; */
+/*     } */
+/*  */
+/* l_cleanup: */
+/*  */
+/*     return result; */
+/* } */
 
 static ssize_t
 log_modify(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)

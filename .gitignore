@@ -56,3 +56,5 @@ dkms.conf
 main
 tags
 __pycache__
+module/connection.c
+module/connection.h
