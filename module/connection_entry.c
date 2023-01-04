@@ -466,22 +466,16 @@ does_proxy_connection_match_skb(proxy_connection_t *proxy_conn,
      *       is not set correctly. We will treat it as zero */
     is_src_ip_from_localhost = (0 == local_ip);
     is_src_port_match = tcp_header->source == proxy_conn->proxy_port;
-    is_src_port_misconfigured = ((0 == proxy_conn->proxy_port) &&
-                                 (TCP_CLOSE == proxy_conn->base.state));
+    is_src_port_misconfigured = (0 == proxy_conn->proxy_port);
     is_dst_ip_match = (ip_header->daddr == proxy_conn->base.id.src_ip);
     is_dst_port_match = (tcp_header->dest == proxy_conn->base.id.src_port);
-
-    if (!is_src_port_misconfigured && (0 == proxy_conn->proxy_port)) {
-        printk(KERN_INFO "%s (skb=%s): source misconfigured problem: got port 0 but state is %d\n",
-                __func__, SKB_str(skb), proxy_conn->base.state);
-    }
 
     does_match = (is_src_ip_from_localhost &&
                   (is_src_port_match || is_src_port_misconfigured) &&
                   is_dst_ip_match &&
                   is_dst_port_match) ? TRUE : FALSE;
     printk(KERN_INFO "%s (skb=%s): local_ip=0x%.8x, proxy: proxy_port=%d, 0x%.8x:%d->0x%.8x:%d. results: %d %d %d %d %d -> %d\n",
-            __func__, SKB_str(skb), local_ip, ntohs(proxy_conn->proxy_port),
+            __func__, SKB_str(skb), ntohl(local_ip), ntohs(proxy_conn->proxy_port),
             ntohl(proxy_conn->base.id.src_ip), ntohs(proxy_conn->base.id.src_port),
             ntohl(proxy_conn->base.id.dst_ip), ntohs(proxy_conn->base.id.dst_port),
             is_src_ip_from_localhost, is_src_port_match,
@@ -533,7 +527,7 @@ proxy_entry_packet_hook(connection_entry_t *entry,
                 ntohl(ip_header->daddr), ntohs(tcp_header->dest));
         break;
     case ENTRY_CMP_TO_SERVER:
-        printk(KERN_INFO "%s: source 0x%.8x:%d changed to 0x%.8x:%d\n", __func__,
+        printk(KERN_INFO "%s: to server: source 0x%.8x:%d changed to 0x%.8x:%d\n", __func__,
                 ntohl(ip_header->saddr), ntohs(tcp_header->source),
                 ntohl(entry->server_proxy->base.id.dst_ip),
                 ntohs(entry->server_proxy->base.id.dst_port));
@@ -545,7 +539,7 @@ proxy_entry_packet_hook(connection_entry_t *entry,
         tcp_header->source = entry->server_proxy->base.id.dst_port;
         break;
     case ENTRY_CMP_TO_CLIENT:
-        printk(KERN_INFO "%s: source 0x%.8x:%d changed to 0x%.8x:%d\n", __func__,
+        printk(KERN_INFO "%s: to client: source 0x%.8x:%d changed to 0x%.8x:%d\n", __func__,
                 ntohl(ip_header->saddr), ntohs(tcp_header->source),
                 ntohl(entry->client_proxy->base.id.dst_ip),
                 ntohs(entry->client_proxy->base.id.dst_port));

@@ -407,9 +407,6 @@ CONNECTION_TABLE_check(connection_table_t *table,
         printk(KERN_INFO "%s (skb=%s): no entry\n", __func__, SKB_str(skb));
         goto l_cleanup;
     }
-    if (ENTRY_CMP_TO_SERVER == cmp_result) {
-        goto l_cleanup;
-    }
 
     is_legal_traffic = tcp_machine_state(table, skb, entry, cmp_result);
     if (ENTRY_CMP_TO_SERVER == cmp_result) {

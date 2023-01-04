@@ -372,21 +372,20 @@ hw4secws_hookfn_local_out(
     UNUSED_ARG(priv);
     UNUSED_ARG(state);
 
-    /* Ignore errors */
+    /* 1. Check the connection */
     printk(KERN_INFO "%s: CONNECTION_TABLE_check for skb=%s\n", __func__, SKB_str(skb));
     conns_match = CONNECTION_TABLE_check(g_connection_table, skb, &action, &reason);
     if (ENTRY_CMP_MISMATCH == conns_match) {
-        printk(KERN_INFO "%s: has no conns match, will pass to rule table\n", __func__);
-        /* 4. Check the rule table */
-        if (tcp_hdr(skb)->syn) {
-            /* Ignore failure */
-            (void)CONNECTION_TABLE_track_local_out(g_connection_table, skb);
-        } else {
-            printk(KERN_ERR "%s: outgoing packet without SYN nor connection table entry! syn%d ack%d fin%d rst%d\n", __func__, tcp_hdr(skb)->syn, tcp_hdr(skb)->ack, tcp_hdr(skb)->fin, tcp_hdr(skb)->rst);
-            action = NF_DROP;
-            goto l_cleanup;
-        }
+        printk(KERN_ERR "%s: outgoing packet without SYN nor connection table entry! syn%d ack%d fin%d rst%d\n", __func__, tcp_hdr(skb)->syn, tcp_hdr(skb)->ack, tcp_hdr(skb)->fin, tcp_hdr(skb)->rst);
+        action = NF_DROP;
+        goto l_cleanup;
     }
+
+    /* [> 2. If SYN packet the rule table <] */
+    /* if (tcp_hdr(skb)->syn) { */
+    /*     [> Ignore failure <] */
+    /*     (void)CONNECTION_TABLE_track_local_out(g_connection_table, skb); */
+    /* } */
 
 l_cleanup:
 
