@@ -28,17 +28,9 @@ static void
 proxy_entry_init_by_skb(proxy_connection_entry_t *entry,
                         const struct sk_buff *skb);
 
-/* static void */
-/* entry_init_by_id(connection_entry_t *entry, */
-/*                  const connection_id_t * id); */
-
 static void
 connection_id_flip(connection_id_t *dest,
                    const connection_id_t *src);
-
-/* static void */
-/* proxy_entry_init_by_id(connection_entry_t *entry, */
-/*                        const connection_id_t *id); */
 
 static void
 proxy_init_proxy_ports(proxy_connection_entry_t *entry,
@@ -72,16 +64,16 @@ static bool_t
 fix_checksum(struct sk_buff *skb);
 
 /**
- * @remark The returned conn must be freed by calling kfree
+ * @remark The returned entry must be freed by calling entry_destory
  */
 static result_t
-connection_alloc(connection_t **conn_out);
+entry_create(connection_entry_t **entry_out);
 
 /**
- * @remark The returned proxy_conn must be freed by calling kfree
+ * @remark The returned pentry must be freed by calling proxy_entry_destroy
  */
 static result_t
-proxy_connection_alloc(proxy_connection_t **proxy_conn_out);
+proxy_entry_create(proxy_connection_entry_t **pentry_out);
 
 static bool_t
 proxy_entry_is_from_client(proxy_connection_entry_t *pentry,
@@ -133,18 +125,21 @@ conn_init_by_skb(connection_t *conn,
                  const struct sk_buff *skb);
 
 
-static void
-conn_init_by_inverse_conn(connection_t *conn,
-                          const connection_t *inverse_conn);
+/* static void */
+/* conn_init_by_inverse_conn(connection_t *conn, */
+/*                           const connection_t *inverse_conn); */
 
+char g_skb_string_buff[1024];
+char g_singleconn_string_buff[1024];
+char g_conn_string_buff[1024];
+char g_entry_string_buff[1024];
 
 /*   G L O B A L S   */
 connection_entry_vtbl_t g_vtable_connection_direct = {
     .type = CONNECTION_TYPE_DIRECT,
-    .connection_alloc = connection_alloc,
-    .init_by_skb = entry_init_by_skb,
+    .create = entry_create,
     .destroy = entry_destroy,
-    /* .init_by_id = entry_init_by_id, */
+    .init_by_skb = entry_init_by_skb,
     .hook = entry_packet_hook,
     .dump = dump_entry,
     .get_conn_by_cmp = entry_get_conn_by_cmp,
@@ -153,10 +148,9 @@ connection_entry_vtbl_t g_vtable_connection_direct = {
 
 connection_entry_vtbl_t g_vtable_connection_proxy = {
     .type = CONNECTION_TYPE_PROXY,
-    .connection_alloc = (connection_alloc_f)proxy_connection_alloc,
-    .init_by_skb = (entry_init_by_skb_f)proxy_entry_init_by_skb,
+    .create = (entry_create_f)proxy_entry_create,
     .destroy = (entry_destroy_f)proxy_entry_destroy,
-    /* .init_by_id = proxy_entry_init_by_id, */
+    .init_by_skb = (entry_init_by_skb_f)proxy_entry_init_by_skb,
     .hook = (entry_hook_f)proxy_entry_packet_hook,
     .dump = (dump_entry_f)dump_proxy_entry,
     .get_conn_by_cmp = (get_conn_by_cmp_f)proxy_entry_get_conn_by_cmp,
@@ -166,64 +160,95 @@ connection_entry_vtbl_t g_vtable_connection_proxy = {
 
 /*   F U N C T I O N S   I M P L E M E N T A T I O N S   */
 static result_t
-connection_alloc(connection_t **conn_out)
+entry_create(connection_entry_t **entry_out)
 {
     result_t result = E__UNKNOWN;
-    connection_t *conn = NULL;
+    connection_entry_t *entry = NULL;
 
     /* 0. Input validation */
-    if (NULL == conn_out) {
+    if (NULL == entry_out) {
         result = E__NULL_INPUT;
         goto l_cleanup;
     }
 
-    /* 1. Allocate a new connection*/
-    conn = (connection_t *)kmalloc(sizeof(*conn), GFP_KERNEL);
-    if (NULL == conn) {
+    /* 1. Allocate a new entry*/
+    entry = (connection_entry_t *)kmalloc(sizeof(*entry), GFP_KERNEL);
+    if (NULL == entry) {
         result = E__KMALLOC_ERROR;
         goto l_cleanup;
     }
-    (void)memset(conn, 0, sizeof(*conn));
+    (void)memset(entry, 0, sizeof(*entry));
+
+    /* 2. Allocate connection */
+    entry->conn = (connection_t *)kmalloc(sizeof(*entry->conn), GFP_KERNEL);
+    if (NULL == entry->conn) {
+        result = E__KMALLOC_ERROR;
+        goto l_cleanup;
+    }
+    (void)memset(entry->conn, 0, sizeof(*entry->conn));
+
+    /* 3. Assign vable */
+    entry->_vtbl = &g_vtable_connection_direct;
 
     /* Success */
-    *conn_out = conn;
+    *entry_out = entry;
 
     result = E__SUCCESS;
 l_cleanup:
     if (E__SUCCESS != result) {
-        KFREE_SAFE(conn);
+        entry_destroy(entry);
     }
     
     return result;
 }
 
 static result_t
-proxy_connection_alloc(proxy_connection_t **proxy_conn_out)
+proxy_entry_create(proxy_connection_entry_t **pentry_out)
 {
     result_t result = E__UNKNOWN;
-    proxy_connection_t *proxy_conn = NULL;
+    proxy_connection_entry_t *pentry = NULL;
 
     /* 0. Input validation */
-    if (NULL == proxy_conn_out) {
+    if (NULL == pentry_out) {
         result = E__NULL_INPUT;
         goto l_cleanup;
     }
 
-    /* 1. Allocate a new connection*/
-    proxy_conn = (proxy_connection_t *)kmalloc(sizeof(*proxy_conn), GFP_KERNEL);
-    if (NULL == proxy_conn) {
+    /* 1. Allocate a new entry*/
+    pentry = (proxy_connection_entry_t *)kmalloc(sizeof(*pentry), GFP_KERNEL);
+    if (NULL == pentry) {
         result = E__KMALLOC_ERROR;
         goto l_cleanup;
     }
-    (void)memset(proxy_conn, 0, sizeof(*proxy_conn));
+    (void)memset(pentry, 0, sizeof(*pentry));
+
+    /* 2. Allocate connections */
+    /* 2.1. Allocate client connection */
+    pentry->client_conn = (proxy_connection_t *)kmalloc(sizeof(*pentry->client_conn), GFP_KERNEL);
+    if (NULL == pentry->client_conn) {
+        result = E__KMALLOC_ERROR;
+        goto l_cleanup;
+    }
+    (void)memset(pentry->client_conn, 0, sizeof(*pentry->client_conn));
+
+    /* 2.2. Allocate server connection */
+    pentry->server_conn = (proxy_connection_t *)kmalloc(sizeof(*pentry->server_conn), GFP_KERNEL);
+    if (NULL == pentry->server_conn) {
+        result = E__KMALLOC_ERROR;
+        goto l_cleanup;
+    }
+    (void)memset(pentry->server_conn, 0, sizeof(*pentry->server_conn));
+
+    /* 3. Assign vable */
+    pentry->_vtbl = &g_vtable_connection_proxy;
 
     /* Success */
-    *proxy_conn_out = proxy_conn;
+    *pentry_out = pentry;
 
     result = E__SUCCESS;
 l_cleanup:
     if (E__SUCCESS != result) {
-        KFREE_SAFE(proxy_conn);
+        proxy_entry_destroy(pentry);
     }
     
     return result;
@@ -251,6 +276,7 @@ conn_init_by_skb(connection_t *conn,
     conn->opener.id.dst_port = tcp_header->dest;
 
     connection_id_flip(&conn->listener.id, &conn->opener.id);
+    printk(KERN_INFO "%s: flipped. conn=%s\n", __func__, CONN_str(conn));
 
     /* 2. State initialiation */
     conn->opener.state = TCP_CLOSE;
@@ -260,13 +286,15 @@ l_cleanup:
     return;
 }
 
-static void
-conn_init_by_inverse_conn(connection_t *conn,
-                          const connection_t *inverse_conn)
-{
-    (void)memcpy(&conn->opener, &inverse_conn->listener, sizeof(conn->opener));
-    (void)memcpy(&conn->listener, &inverse_conn->opener, sizeof(conn->opener));
-}
+/* static void */
+/* conn_init_by_inverse_conn(connection_t *conn, */
+/*                           const connection_t *inverse_conn) */
+/* { */
+/*     (void)memcpy(&conn->opener, &inverse_conn->listener, sizeof(conn->opener)); */
+/*     (void)memcpy(&conn->listener, &inverse_conn->opener, sizeof(conn->opener)); */
+/*     printk(KERN_INFO "%s: init by inverse conn\norig: %s\n", __func__, CONN_str(inverse_conn)); */
+/*     printk(KERN_INFO "inverse: %s\n", CONN_str(inverse_conn)); */
+/* } */
 
 static void
 entry_init_by_skb(connection_entry_t *entry,
@@ -287,11 +315,12 @@ proxy_entry_init_by_skb(proxy_connection_entry_t *entry,
     }
 
     tcp_header = tcp_hdr(skb);
-
     /* 1. Init connections */
     conn_init_by_skb((connection_t *)entry->client_conn, skb);
-    conn_init_by_inverse_conn((connection_t *)entry->server_conn,
-                              (connection_t *)entry->client_conn);
+    printk(KERN_INFO "%s: client_conn= %s\n", __func__, CONN_str((connection_t *)entry->client_conn));
+    conn_init_by_skb((connection_t *)entry->server_conn, skb);
+    /* conn_init_by_inverse_conn((connection_t *)entry->server_conn, */
+    /*                           (connection_t *)entry->client_conn); */
 
     /* 2. Proxy ports */
     proxy_init_proxy_ports(entry, tcp_header->dest);
@@ -352,19 +381,6 @@ l_cleanup:
     return should_be_dropped;
 }
 
-/* static void */
-/* entry_init_by_id(connection_entry_t *entry, */
-/*                  const connection_id_t * id) */
-/* { */
-/*     [> 1. Init ID's <] */
-/*     (void)memcpy(&entry->conn->opener.id, id, sizeof(*id)); */
-/*     connection_id_flip(&entry->conn->listener.id, &entry->conn->opener.id); */
-/*  */
-/*     [> 2. Init states <] */
-/*     entry->conn->listener.state = TCP_CLOSE; */
-/*     entry->conn->opener.state = TCP_CLOSE; */
-/* } */
-
 static void
 proxy_init_proxy_ports(proxy_connection_entry_t *entry,
                        uint16_t port_n)
@@ -386,25 +402,6 @@ proxy_init_proxy_ports(proxy_connection_entry_t *entry,
             break;
     }
 }
-
-/* static void */
-/* proxy_entry_init_by_id(connection_entry_t *entry, */
-/*                        const connection_id_t *id) */
-/* { */
-/*     [> 0. Input validation <] */
-/*     if ((NULL == entry) || (NULL == id)) { */
-/*         goto l_cleanup; */
-/*     } */
-/*  */
-/*     [> 1. Call super function <] */
-/*     entry_init_by_id(entry, id); */
-/*  */
-/*     [> 2. Init proxy port <] */
-/*     proxy_init_proxy_ports(entry, tcp_hdr(skb)->dest */
-/*  */
-/* l_cleanup: */
-/*     return; */
-/* } */
 
 static uint32_t
 get_local_ip__network_order(struct net_device *dev)
@@ -497,6 +494,8 @@ proxy_entry_compare_packet(proxy_connection_entry_t *entry,
         printk(KERN_INFO "%s: proxy to server\n", __func__);
         /* Proxy to server */
         result = ENTRY_CMP_TO_SERVER;
+    } else {
+        printk(KERN_INFO "%s: mismatch!\n", __func__);
     }
 
 
@@ -536,17 +535,21 @@ proxy_entry_is_from_client(proxy_connection_entry_t *pentry,
 
     /* Note: On LOCAL-OUT hook, we get the skb->dev to be NULL so the soruce IP
      *       is not set correctly. We will treat it as zero */
+    if (NULL == pentry->client_conn || NULL == pentry->server_conn) {
+        printk(KERN_INFO "%s: CRAZY BUG\n", __func__);
+        return FALSE;
+    }
     is_src_ok = ((ip_header->saddr == pentry->client_conn->opener.id.src_ip) &&
                  (tcp_header->source == pentry->client_conn->opener.id.src_port));
     is_dst_ok = ((ip_header->daddr == pentry->server_conn->listener.id.src_ip) &&
                  (tcp_header->dest == pentry->server_conn->listener.id.src_port));
 
     does_match = is_src_ok && is_dst_ok;
+    printk(KERN_INFO "%s (skb=%s): res %d %d -> %d, entry %s\n", __func__, SKB_str(skb), is_src_ok, is_dst_ok, does_match, ENTRY_str((connection_entry_t *)pentry));
 
     return does_match;
 }
     
-
 static bool_t
 proxy_entry_is_from_server(proxy_connection_entry_t *pentry,
                            const struct sk_buff *skb)
@@ -709,7 +712,6 @@ proxy_entry_packet_hook(proxy_connection_entry_t *entry,
         printk(KERN_INFO "%s (skb=%s): was not modified\n", __func__, SKB_str(skb));
         was_modified = FALSE;
         break;
-
     }
 
     /* Ignore failure of checksum */
@@ -746,26 +748,12 @@ CONNECTION_ENTRY_create_from_syn(connection_entry_t **entry_out,
     }
 
     /* 2. Allocate entry */
-    entry = (connection_entry_t *)kmalloc(sizeof(*entry), GFP_KERNEL);
-    if (NULL == entry) {
-        printk(KERN_ERR "%s: can't allocate entry\n", __func__);
-        result = E__KMALLOC_ERROR;
-        goto l_cleanup;
-    }
-    (void)memset(entry, 0, sizeof(*entry));
-
-    /* 3. Assign vtable */
-    entry->_vtbl = vtable;
-
-    /* 4. Create connections */
-    /* 4.1. Client connection */
-    result = CONNECTION_ENTRY_connection_alloc(&entry->conn);
+    result = vtable->create(&entry);
     if (E__SUCCESS != result) {
-        printk(KERN_ERR "%s: can't allocate client connection\n", __func__);
         goto l_cleanup;
     }
 
-    /* 5. Init entry's connection */
+    /* 3. Init entry's connection */
     CONNECTION_ENTRY_init_by_skb(entry, skb);
 
     /* Success */
@@ -775,7 +763,9 @@ CONNECTION_ENTRY_create_from_syn(connection_entry_t **entry_out,
 l_cleanup:
 
     if (E__SUCCESS != result) {
-        CONNECTION_ENTRY_destroy(entry);
+        if ((NULL != vtable) && (NULL != entry)) {
+            CONNECTION_ENTRY_destroy(entry);
+        }
     }
 
     return result;
@@ -802,7 +792,70 @@ proxy_entry_destroy(proxy_connection_entry_t *pentry)
     KFREE_SAFE(pentry);
 }
 
-char g_skb_string_buff[1024];
+
+const char *
+SINGLE_CONN_str(const single_connection_t *conn)
+{
+    if (NULL == conn) {
+        (void)memset(g_singleconn_string_buff, 0, sizeof(g_singleconn_string_buff));
+    } else {
+        snprintf(g_singleconn_string_buff, sizeof(g_singleconn_string_buff),
+                "0x%.8x:%d->0x%.8x:%d (state %d)",
+                ntohl(conn->id.src_ip), ntohs(conn->id.src_port),
+                ntohl(conn->id.dst_ip), ntohs(conn->id.dst_port),
+                conn->state);
+    }
+    return g_singleconn_string_buff;
+}
+
+
+const char *
+CONN_str(const connection_t *conn)
+{
+    size_t i = 0;
+    if (NULL == conn) {
+        (void)memset(g_conn_string_buff, 0, sizeof(g_conn_string_buff));
+    } else {
+        i += snprintf(g_conn_string_buff, sizeof(g_conn_string_buff),
+                "<Opener: %s>",
+                SINGLE_CONN_str(&conn->opener));
+        i += snprintf(&g_conn_string_buff[i], sizeof(g_conn_string_buff) - i,
+                " <Listener: %s>",
+                SINGLE_CONN_str(&conn->listener));
+    }
+    return g_conn_string_buff;
+}
+
+const char *
+ENTRY_str(const connection_entry_t *ent)
+{
+    size_t i = 0;
+    if (NULL == ent) {
+        (void)memset(g_entry_string_buff, 0, sizeof(g_entry_string_buff));
+    } else {
+        switch (ent->_vtbl->type)
+        {
+        case CONNECTION_TYPE_DIRECT:
+            snprintf(g_entry_string_buff, sizeof(g_entry_string_buff),
+                    "Entry: %s",
+                    CONN_str(ent->conn));
+            break;
+        case CONNECTION_TYPE_PROXY:
+            i = snprintf(g_entry_string_buff, sizeof(g_entry_string_buff),
+                    "Proxy Entry: [Client %s] ",
+                    CONN_str((connection_t *)((proxy_connection_entry_t *)ent)->client_conn)
+                    );
+            snprintf(&g_entry_string_buff[i], sizeof(g_entry_string_buff) - i,
+                    " [Server %s]",
+                    CONN_str((connection_t *)((proxy_connection_entry_t *)ent)->server_conn)
+                    );
+        break;
+        default:
+        break;
+        }
+    }
+    return g_entry_string_buff;
+}
 
 const char *
 SKB_str(const struct sk_buff *skb)
@@ -850,7 +903,7 @@ dump_proxy_entry(const proxy_connection_entry_t *pentry,
                  size_t buffer_size)
 {
     size_t dumped_size = 0;
-    const size_t required_size = sizeof(*pentry->client_conn) + sizeof(*pentry->server_conn);
+    const size_t required_size = sizeof(*pentry->client_conn_nonproxy) + sizeof(*pentry->server_conn_nonproxy);
 
     if ((NULL == pentry) || (NULL == buffer)) {
         goto l_cleanup;
@@ -860,8 +913,8 @@ dump_proxy_entry(const proxy_connection_entry_t *pentry,
         goto l_cleanup;
     }
 
-    (void)memcpy(buffer, pentry->client_conn, sizeof(*pentry->client_conn));
-    (void)memcpy(&buffer[sizeof(*pentry->client_conn)], pentry->server_conn, sizeof(*pentry->client_conn));
+    (void)memcpy(buffer, pentry->client_conn_nonproxy, sizeof(*pentry->client_conn_nonproxy));
+    (void)memcpy(&buffer[sizeof(*pentry->client_conn_nonproxy)], pentry->server_conn_nonproxy, sizeof(*pentry->server_conn_nonproxy));
     dumped_size = required_size;
 
 l_cleanup:
@@ -877,6 +930,7 @@ entry_get_conn_by_cmp(connection_entry_t *entry,
 {
     bool_t is_success = TRUE;
 
+    printk(KERN_INFO "%s: hello\n", __func__);
     if ((NULL != src_out) && (NULL != dst_out)) {
         switch (cmp_res)
         {
@@ -905,29 +959,38 @@ proxy_entry_get_conn_by_cmp(proxy_connection_entry_t *entry,
 {
     bool_t is_success = TRUE;
 
+    printk(KERN_INFO "%s: hello\n", __func__);
     if ((NULL != src_out) && (NULL != dst_out)) {
         switch (cmp_res)
         {
         case ENTRY_CMP_FROM_CLIENT:
+            printk(KERN_INFO "%s: from client\n", __func__);
             *src_out = &entry->client_conn->opener;
             *dst_out = &entry->client_conn->listener;
             break;
         case ENTRY_CMP_FROM_SERVER:
+            printk(KERN_INFO "%s: from server\n", __func__);
             *src_out = &entry->server_conn->listener;
             *dst_out = &entry->server_conn->opener;
             break;
         case ENTRY_CMP_TO_CLIENT:
-            *src_out = &entry->server_conn->listener;
-            *dst_out = &entry->server_conn->opener;
+            printk(KERN_INFO "%s: to client\n", __func__);
+            *src_out = &entry->client_conn->listener;
+            *dst_out = &entry->client_conn->opener;
             break;
         case ENTRY_CMP_TO_SERVER:
+            printk(KERN_INFO "%s: to server\n", __func__);
             *src_out = &entry->server_conn->opener;
             *dst_out = &entry->server_conn->listener;
             break;
         default:
+            printk(KERN_INFO "%s: error!\n", __func__);
             is_success = FALSE;
             break;
         }
+    } else {
+        is_success = FALSE;
+        printk(KERN_INFO "%s: something is BAD\n", __func__);
     }
 
     return is_success;

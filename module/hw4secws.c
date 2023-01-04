@@ -381,11 +381,11 @@ hw4secws_hookfn_local_out(
         goto l_cleanup;
     }
 
-    /* [> 2. If SYN packet the rule table <] */
-    /* if (tcp_hdr(skb)->syn) { */
-    /*     [> Ignore failure <] */
-    /*     (void)CONNECTION_TABLE_track_local_out(g_connection_table, skb); */
-    /* } */
+    /* 2. If SYN packet the rule table */
+    if (tcp_hdr(skb)->syn) {
+        /* Ignore failure */
+        (void)CONNECTION_TABLE_track_local_out(g_connection_table, skb);
+    }
 
 l_cleanup:
 
@@ -443,6 +443,7 @@ hw4secws_hookfn_pre_routing(
                     /* Ignore failure */
                     printk(KERN_INFO "%s: handling accpeted syn\n", __func__);
                     (void)CONNECTION_TABLE_handle_accepted_syn(g_connection_table, skb);
+
                     /* 6. Check the connection table once again - after inserting new rule */
                     printk(KERN_INFO "%s: CONNECTION_TABLE_check for skb=%s first syn\n", __func__, SKB_str(skb));
                     conns_match = CONNECTION_TABLE_check(g_connection_table, skb, &action, &reason);

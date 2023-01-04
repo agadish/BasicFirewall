@@ -116,6 +116,7 @@ class ProxyServer(object):
         self._is_listening = False
         self._connections = list()
         self._reactor = Reactor()
+        self._clients_junk = list()
 
     def listen(self):
         s = socket.socket()
@@ -132,6 +133,7 @@ class ProxyServer(object):
     def accept_client(self):
         # 1. Accept client
         client_socket, client_addr = self._socket.accept()
+        self._clients_junk.append(client_socket)
 
         # 2. Read entry information from sysfs
         entry = self.read_connection_entry(client_addr)
@@ -145,13 +147,15 @@ class ProxyServer(object):
         try:
             print('Proxy: connecting to %s' % (entry.get_peer(client_addr), ))
             entry.peer_socket.connect(entry.get_peer(client_addr))
+            print('Proxy: connected')
         except Exception as e:
             print('ERROR connecting to peer: %s' % (e, ))
             client_socket.close()
             return
 
         # 4. Save client sockets
-        entry.register_to_reactor(self._reactor)
+        handler = self.create_client_handler(entry)
+        handler.register_to_reactor(self._reactor)
 
     @classmethod
     def read_connection_entry(cls, addr):
@@ -168,7 +172,15 @@ class ProxyServer(object):
         print('Listening on %s:%d...' % (self._bind_addr, self._listen_port, ))
         self._reactor.register_read(self._socket.fileno(), self.accept_client)
         while True:
-            self._reactor.run_epoch()
+            try:
+                self._reactor.run_epoch()
+            except Exception as e:
+                print('error %s' % (e, ))
+                print('clients: %s' % (self._clients_junk, ))
 
     def create_client_handler(self, entry):
         raise NotImplementedError()
+
+    def __del__(self):
+        print('del')
+        super(ProxyServer, self).__del__()

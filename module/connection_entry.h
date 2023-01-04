@@ -26,10 +26,8 @@
 #define _ENTRY_VTBL(entry) (((connection_entry_t *)(entry))->_vtbl)
 #define CONNECTION_ENTRY_init_by_skb(entry, skb) (_ENTRY_VTBL((entry))->init_by_skb((connection_entry_t *)(entry), (skb)))
 #define CONNECTION_ENTRY_destroy(entry) (_ENTRY_VTBL((entry))->destroy((connection_entry_t *)(entry)))
-// #define CONNECTION_ENTRY_init_by_id(entry, id) (_ENTRY_VTBL((entry))->init_by_id((entry), (id)))
 #define CONNECTION_ENTRY_hook(entry, skb) (_ENTRY_VTBL((entry))->hook((connection_entry_t *)(entry), (skb)))
 #define CONNECTION_ENTRY_compare(entry, skb) (_ENTRY_VTBL((entry))->compare((connection_entry_t *)(entry), (skb)))
-#define CONNECTION_ENTRY_connection_alloc(conn_out) (_ENTRY_VTBL((entry))->connection_alloc(conn_out))
 #define CONNECTION_ENTRY_dump(entry, buf, buflen) (_ENTRY_VTBL((entry))->dump((connection_entry_t *)(entry), (buf), (buflen)))
 
 #define IS_PROXY_ENTRY(entry) (CONNECTION_TYPE_PROXY == _ENTRY_VTBL((entry))->type)
@@ -59,11 +57,10 @@ typedef struct connection_id_s connection_id_t;
 typedef struct single_connection_s single_connection_t;
 typedef struct connection_entry_s connection_entry_t;
 typedef struct proxy_connection_entry_s proxy_connection_entry_t;
+typedef result_t (*entry_create_f)(connection_entry_t **entry_out);
 typedef void (*entry_init_by_skb_f)(connection_entry_t *entry,
                                     const struct sk_buff *skb);
 typedef void (*entry_destroy_f)(connection_entry_t *entry);
-// typedef void (*entry_init_by_id_f)(connection_entry_t *entry,
-//                                    const connection_id_t *id);
 
 typedef void (*entry_hook_f)(connection_entry_t *conn,
                              struct sk_buff *skb);
@@ -75,7 +72,6 @@ typedef bool_t (*get_conn_by_cmp_f)(connection_entry_t *entry,
                                     single_connection_t **src_out,
                                     single_connection_t **dst_out);
 
-typedef result_t (*connection_alloc_f)(connection_t **conn_out);
 typedef size_t (*dump_entry_f)(const connection_entry_t *entry,
                              uint8_t *buffer,
                              size_t buffer_size);
@@ -84,14 +80,13 @@ typedef size_t (*dump_entry_f)(const connection_entry_t *entry,
 /*   S T R U C T S   */
 typedef struct connection_entry_vtbl_s {
     connection_type_t type;
-    connection_alloc_f connection_alloc;
+    entry_create_f create;
+    entry_destroy_f destroy;
     entry_init_by_skb_f init_by_skb;
-    // entry_init_by_id_f init_by_id;
     entry_hook_f hook;
     entry_compare_f compare;
     dump_entry_f dump;
     get_conn_by_cmp_f get_conn_by_cmp;
-    entry_destroy_f destroy;
 } connection_entry_vtbl_t;
 
 #pragma pack(1)
@@ -130,8 +125,14 @@ struct connection_entry_s {
 struct proxy_connection_entry_s {
     struct klist_node node;
     connection_entry_vtbl_t *_vtbl;
-    proxy_connection_t *client_conn;
-    proxy_connection_t *server_conn;
+    union {
+        proxy_connection_t *client_conn;
+        connection_t *client_conn_nonproxy;
+    };
+    union {
+        proxy_connection_t *server_conn;
+        connection_t *server_conn_nonproxy;
+    };
 };
 
 
@@ -147,6 +148,14 @@ extern connection_entry_vtbl_t g_vtable_connection_proxy;
 result_t
 CONNECTION_ENTRY_create_from_syn(connection_entry_t **entry_out,
                                   const struct sk_buff *skb);
+const char *
+ENTRY_str(const connection_entry_t *ent);
+
+const char *
+CONN_str(const connection_t *conn);
+
+const char *
+SINGLE_CONN_str(const single_connection_t *conn);
 
 
 #endif /* __CONNECTION_ENTRY_H__ */

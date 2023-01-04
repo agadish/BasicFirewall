@@ -99,6 +99,7 @@ CONNECTION_TABLE_destroy(connection_table_t *table)
     klist_iter_init((struct klist *)&table->list, &list_iter);
     current_entry = (connection_entry_t *)klist_next(&list_iter);
 
+    printk(KERN_INFO "%s: booya\n", __func__);
     while (NULL != current_entry) {
         next_entry = (connection_entry_t *)klist_next(&list_iter);
         klist_del(&current_entry->node);
@@ -144,9 +145,9 @@ CONNECTION_TABLE_dump_data(const connection_table_t *table,
     while (remaining_length > 0) {
         /* 1. Get next chunk  */
         entry = (connection_entry_t *)klist_next(&list_iter); 
-        printk(KERN_INFO "%s: entry scanned 0x%.8x\n", __func__, (uint32_t)entry);
         /* 2. Last chunk? break */
         if (NULL == entry) {
+            printk(KERN_INFO "%s: end of dump\n", __func__);
             result = TRUE;
             break;
         }
@@ -154,6 +155,7 @@ CONNECTION_TABLE_dump_data(const connection_table_t *table,
         current_length = CONNECTION_ENTRY_dump(entry,
                                                &buffer[current_index],
                                                remaining_length);
+        printk(KERN_INFO "%s: entry_dump size %d\n", __func__, current_length);
         if (0 == current_length) {
             break;
         }
@@ -333,18 +335,13 @@ CONNECTION_TABLE_track_local_out(connection_table_t *table,
     is_proxy_connection = IS_PROXY_ENTRY(entry);
     if (is_proxy_connection) {
         CONNECTION_ENTRY_hook(entry, skb);
-
-        /* switch (conn->state) */
-        /* { */
-        /*     caseswitch (conn->state) */
-        /*     { */
-        /*         case  */
     }
 
 l_cleanup:
 
     return was_handled;
 }
+
 
 entry_cmp_result_t
 CONNECTION_TABLE_check(connection_table_t *table,
@@ -391,7 +388,9 @@ CONNECTION_TABLE_check(connection_table_t *table,
     }
 
     /* 3. Get sender and receiver */
+    printk(KERN_INFO "%s: calling CONNECTION_ENTRY_get_conn_by_cmp=%p...\n", __func__, entry->_vtbl->get_conn_by_cmp);
     result_get_conn = CONNECTION_ENTRY_get_conn_by_cmp(entry, cmp_result, &conn_sender, &conn_receiver);
+    printk(KERN_INFO "%s: get_conn_by_cmp returned\n", __func__);
     if (!result_get_conn) {
         printk(KERN_INFO "%s (skb=%s): invalid get conn\n", __func__, SKB_str(skb));
         remove_entry(entry);
@@ -401,7 +400,11 @@ CONNECTION_TABLE_check(connection_table_t *table,
     }
 
     /* 4. Handle TCP state machine */
+    printk(KERN_INFO "%s: beeforetcp sender=%s\n", __func__, SINGLE_CONN_str(conn_sender));
+    printk(KERN_INFO "%s: beforetcp receiver=%s\n", __func__, SINGLE_CONN_str(conn_receiver));
     is_legal_traffic = tcp_machine_state(conn_sender, conn_receiver, skb, &is_removed);
+    printk(KERN_INFO "%s: afftertcp sender=%s\n", __func__, SINGLE_CONN_str(conn_sender));
+    printk(KERN_INFO "%s: aftertcp receiver=%s\n", __func__, SINGLE_CONN_str(conn_receiver));
     /* 3. Check if the traffic is legal, drop illegal traffic */
     if (is_legal_traffic) {
         *action_out = NF_ACCEPT;
@@ -410,6 +413,7 @@ CONNECTION_TABLE_check(connection_table_t *table,
         if (is_removed) {
             printk(KERN_INFO "%s (skb=%s): got rst, removing entry\n", __func__, SKB_str(skb));
             remove_entry(entry);
+            goto l_cleanup;
         }
     } if (!is_legal_traffic) {
         /* Drop the entry */
@@ -518,6 +522,7 @@ search_entry(struct klist *entries_list,
 static void
 remove_entry(connection_entry_t *entry)
 {
+    printk(KERN_INFO "%s: booya\n", __func__);
     if (NULL != entry) {
         klist_del(&entry->node);
         CONNECTION_ENTRY_destroy(entry);
