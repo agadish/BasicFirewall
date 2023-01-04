@@ -276,7 +276,7 @@ conn_init_by_skb(connection_t *conn,
     conn->opener.id.dst_port = tcp_header->dest;
 
     connection_id_flip(&conn->listener.id, &conn->opener.id);
-    printk(KERN_INFO "%s: flipped. conn=%s\n", __func__, CONN_str(conn));
+    /* printk(KERN_INFO "%s: flipped. conn=%s\n", __func__, CONN_str(conn)); */
 
     /* 2. State initialiation */
     conn->opener.state = TCP_CLOSE;
@@ -317,7 +317,7 @@ proxy_entry_init_by_skb(proxy_connection_entry_t *entry,
     tcp_header = tcp_hdr(skb);
     /* 1. Init connections */
     conn_init_by_skb((connection_t *)entry->client_conn, skb);
-    printk(KERN_INFO "%s: client_conn= %s\n", __func__, CONN_str((connection_t *)entry->client_conn));
+    /* printk(KERN_INFO "%s: client_conn= %s\n", __func__, CONN_str((connection_t *)entry->client_conn)); */
     conn_init_by_skb((connection_t *)entry->server_conn, skb);
     /* conn_init_by_inverse_conn((connection_t *)entry->server_conn, */
     /*                           (connection_t *)entry->client_conn); */
@@ -568,6 +568,7 @@ proxy_entry_is_from_server(proxy_connection_entry_t *pentry,
                  (tcp_header->dest == pentry->client_conn->opener.id.src_port));
 
     does_match = is_src_ok && is_dst_ok;
+    printk(KERN_INFO "%s (skb=%s): res %d %d -> %d, entry %s\n", __func__, SKB_str(skb), is_src_ok, is_dst_ok, does_match, ENTRY_str((connection_entry_t *)pentry));
 
     return does_match;
 }
@@ -628,19 +629,14 @@ proxy_entry_is_to_server(proxy_connection_entry_t *pentry,
     is_src_port_misconfigured = ((0 == pentry->server_conn->proxy_port) &&
                                  (TCP_CLOSE == pentry->server_conn->opener.state));
     is_src_port_match = tcp_header->source == pentry->client_conn->proxy_port;
-    is_dst_ip_match = (ip_header->daddr == pentry->client_conn->listener.id.dst_ip);
-    is_dst_port_match = (tcp_header->dest == pentry->client_conn->listener.id.dst_port);
+    is_dst_ip_match = (ip_header->daddr == pentry->server_conn->listener.id.src_ip);
+    is_dst_port_match = (tcp_header->dest == pentry->server_conn->listener.id.src_port);
 
     does_match = (is_src_ip_from_localhost &&
                   (is_src_port_match || is_src_port_misconfigured) &&
                   is_dst_ip_match &&
                   is_dst_port_match) ? TRUE : FALSE;
-    /* printk(KERN_INFO "%s (skb=%s): local_ip=0x%.8x, proxy: proxy_port=%d, 0x%.8x:%d->0x%.8x:%d. results: %d %d %d %d %d -> %d\n", */
-    /*         __func__, SKB_str(skb), ntohl(local_ip), ntohs(proxy_conn->proxy_port), */
-    /*         ntohl(proxy_conn->id.src_ip), ntohs(proxy_conn->id.src_port), */
-    /*         ntohl(proxy_conn->id.dst_ip), ntohs(proxy_conn->id.dst_port), */
-    /*         is_src_ip_from_localhost, is_src_port_match, */
-    /*         is_src_port_misconfigured, is_dst_ip_match, is_dst_port_match, does_match); */
+    printk(KERN_INFO "%s (skb=%s): entry %s. (%d && (%d || %d) && %d && %d) --> %d\n", __func__, SKB_str(skb), ENTRY_str((connection_entry_t *)pentry), is_src_ip_from_localhost, is_src_port_misconfigured, is_src_port_match, is_dst_ip_match, is_dst_port_match, does_match);
 
     return does_match;
 }
@@ -664,6 +660,7 @@ proxy_entry_packet_hook(proxy_connection_entry_t *entry,
     entry_cmp_result_t cmp_result = ENTRY_CMP_MISMATCH;
     bool_t was_modified = TRUE;
 
+    printk(KERN_INFO "%s (skb=%s): enter\n", __func__, SKB_str(skb));
     cmp_result = CONNECTION_ENTRY_compare(entry, skb);
     switch (cmp_result) 
     {
@@ -694,8 +691,9 @@ proxy_entry_packet_hook(proxy_connection_entry_t *entry,
                 ntohs(entry->client_conn->listener.id.dst_port));
         ip_header->saddr = entry->client_conn->listener.id.dst_ip;
         /* Assign proxy port on first time */
-        if (0 == entry->client_conn->proxy_port) {
-            entry->client_conn->proxy_port = tcp_header->source;
+        if (0 == entry->server_conn->proxy_port) {
+            printk(KERN_INFO "%s: SETTING THE PROXY PORT FIRST TIME =%d\n", __func__, ntohs(tcp_header->source));
+            entry->server_conn->proxy_port = tcp_header->source;
         }
         tcp_header->source = entry->client_conn->listener.id.dst_port;
         break;
@@ -842,11 +840,13 @@ ENTRY_str(const connection_entry_t *ent)
             break;
         case CONNECTION_TYPE_PROXY:
             i = snprintf(g_entry_string_buff, sizeof(g_entry_string_buff),
-                    "Proxy Entry: [Client %s] ",
+                    "Proxy Entry: [Client (prox %d) %s] ",
+                    ntohs(((proxy_connection_entry_t *)ent)->client_conn->proxy_port),
                     CONN_str((connection_t *)((proxy_connection_entry_t *)ent)->client_conn)
                     );
             snprintf(&g_entry_string_buff[i], sizeof(g_entry_string_buff) - i,
-                    " [Server %s]",
+                    " [Server (prox %d) %s]",
+                    ntohs(((proxy_connection_entry_t *)ent)->server_conn->proxy_port),
                     CONN_str((connection_t *)((proxy_connection_entry_t *)ent)->server_conn)
                     );
         break;
@@ -930,7 +930,7 @@ entry_get_conn_by_cmp(connection_entry_t *entry,
 {
     bool_t is_success = TRUE;
 
-    printk(KERN_INFO "%s: hello\n", __func__);
+    /* printk(KERN_INFO "%s: hello\n", __func__); */
     if ((NULL != src_out) && (NULL != dst_out)) {
         switch (cmp_res)
         {
@@ -959,27 +959,27 @@ proxy_entry_get_conn_by_cmp(proxy_connection_entry_t *entry,
 {
     bool_t is_success = TRUE;
 
-    printk(KERN_INFO "%s: hello\n", __func__);
+    /* printk(KERN_INFO "%s: hello\n", __func__); */
     if ((NULL != src_out) && (NULL != dst_out)) {
         switch (cmp_res)
         {
         case ENTRY_CMP_FROM_CLIENT:
-            printk(KERN_INFO "%s: from client\n", __func__);
+            /* printk(KERN_INFO "%s: from client\n", __func__); */
             *src_out = &entry->client_conn->opener;
             *dst_out = &entry->client_conn->listener;
             break;
         case ENTRY_CMP_FROM_SERVER:
-            printk(KERN_INFO "%s: from server\n", __func__);
+            /* printk(KERN_INFO "%s: from server\n", __func__); */
             *src_out = &entry->server_conn->listener;
             *dst_out = &entry->server_conn->opener;
             break;
         case ENTRY_CMP_TO_CLIENT:
-            printk(KERN_INFO "%s: to client\n", __func__);
+            /* printk(KERN_INFO "%s: to client\n", __func__); */
             *src_out = &entry->client_conn->listener;
             *dst_out = &entry->client_conn->opener;
             break;
         case ENTRY_CMP_TO_SERVER:
-            printk(KERN_INFO "%s: to server\n", __func__);
+            /* printk(KERN_INFO "%s: to server\n", __func__); */
             *src_out = &entry->server_conn->opener;
             *dst_out = &entry->server_conn->listener;
             break;

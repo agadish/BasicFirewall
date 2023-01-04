@@ -181,6 +181,3 @@ class ProxyServer(object):
     def create_client_handler(self, entry):
         raise NotImplementedError()
 
-    def __del__(self):
-        print('del')
-        super(ProxyServer, self).__del__()

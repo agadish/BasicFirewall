@@ -382,10 +382,10 @@ hw4secws_hookfn_local_out(
     }
 
     /* 2. If SYN packet the rule table */
-    if (tcp_hdr(skb)->syn) {
-        /* Ignore failure */
-        (void)CONNECTION_TABLE_track_local_out(g_connection_table, skb);
-    }
+    /* if (tcp_hdr(skb)->syn) { */
+    /*     [> Ignore failure <] */
+    /*     (void)CONNECTION_TABLE_track_local_out(g_connection_table, skb); */
+    /* } */
 
 l_cleanup:
 
@@ -434,7 +434,7 @@ hw4secws_hookfn_pre_routing(
                 reason = REASON_NO_MATCHING_RULE;
                 goto l_cleanup;
             }
-            printk(KERN_INFO "%s: has rule match\n", __func__);
+            /* printk(KERN_INFO "%s: has rule match\n", __func__); */
             /* Note: If we reach here it must be a TCP syn */
             /* 5. Matching rule - should bes SYN, update connection table */
             if (IPPROTO_TCP == ip_hdr(skb)->protocol) {

@@ -355,7 +355,6 @@ RULE_TABLE_check(const rule_table_t *table,
         if (does_match_rule(current_rule, skb)) {
             /* 2.1. Found a matching rule */
             does_match = TRUE;
-            /* printk(KERN_DEBUG "FOUND MATCHING RULE \"%s\": action %d\n", current_rule->rule_name, current_rule->action); */
 
             /* 2.2. Return the rule's action,  and the rule id as the reason */
             *action_out = current_rule->action;
@@ -395,7 +394,6 @@ is_loopback_packet(const struct sk_buff *skb)
     size_t name_length = ARRAY_SIZE(skb->dev->name);
 
     if (0 == strncmp(iface_name, LO_INTERFACE, name_length)) {
-        /* printk(KERN_INFO "Found loopback packet\n"); */
         result = TRUE;
     }
 
@@ -412,14 +410,13 @@ get_packet_direction(const struct sk_buff *skb)
     if (NULL == iface_name) {
         /* Localhost */
         direction = DIRECTION_ANY; 
-        printk(KERN_ERR "%s: direciton any for skb=%s\n", __func__, SKB_str(skb));
     }
     if (0 == strncmp(iface_name, IN_INTERFACE, name_length)) {
         direction = DIRECTION_IN;
     } else if (0 == strncmp(iface_name, OUT_INTERFACE, name_length)) {
         direction = DIRECTION_OUT;
     } else {
-        printk(KERN_INFO "direction UNKNOWN: got %s\n", iface_name);
+        /* printk(KERN_INFO "direction UNKNOWN: got %s\n", iface_name); */
         direction = DIRECTION_UNKNOWN;
     }
 
@@ -436,26 +433,22 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
     /* 1. Match soruce ip */
     if ((rule->src_ip & rule->src_prefix_mask) !=
             (ip_header->saddr & rule->src_prefix_mask)) {
-        /* printk(KERN_INFO "%s: fell for source ip\n", __func__); */
         goto l_cleanup;
     }
     
     /* 2. Match destionation ip */
     if ((rule->dst_ip & rule->dst_prefix_mask) !=
             (ip_header->daddr & rule->dst_prefix_mask)) {
-        /* printk(KERN_INFO "%s: fell for dst ip\n", __func__); */
         goto l_cleanup;
     }
 
     /* 3. Match protocol */
     if ((PROT_ANY != rule->protocol) && 
         (ip_header->protocol != rule->protocol)) {
-        /* printk(KERN_INFO "%s: fell for protocol\n", __func__); */
         goto l_cleanup;
     }
 
     /* 4. TCP specific */
-    /* printk(KERN_INFO "%s: matching protocol %d...\n", __func__, ip_header->protocol); */
     if (IPPROTO_TCP == ip_header->protocol) {
         struct tcphdr *tcp_header = (struct tcphdr *)skb_transport_header(skb);
         /* 4.1. Match src port */
@@ -463,7 +456,6 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
             (!((PORT_MORE_THAN_1023_N == rule->src_port) && ntohs(tcp_header->source) > PORT_1023)) &&
             (rule->src_port != tcp_header->source))
         {
-            /* printk(KERN_INFO "%s: fell for src port\n", __func__); */
 
             goto l_cleanup;
         }
@@ -473,13 +465,11 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
             (!((PORT_MORE_THAN_1023_N == rule->dst_port) && ntohs(tcp_header->dest) > PORT_1023)) &&
             (rule->dst_port != tcp_header->dest))
         {
-            /* printk(KERN_INFO "%s: fell for dst port\n", __func__); */
             goto l_cleanup;
         }
 
         /* 4.3. TCP: match flags */
         if (!DOES_ACK_MATCH(tcp_header, rule)) {
-            /* printk(KERN_INFO "%s: fell for flags\n", __func__); */
             goto l_cleanup;
         }
     /* 5. UDP specific */
@@ -491,7 +481,6 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
             ((PORT_MORE_THAN_1023_N == rule->src_port) && ntohs(udp_header->source) <= PORT_1023))
         {
 
-            /* printk(KERN_INFO "%s: fell for sport\n", __func__); */
             goto l_cleanup;
         }
 
@@ -500,8 +489,6 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
             (rule->dst_port != udp_header->dest) &&
             ((PORT_MORE_THAN_1023_N == rule->dst_port) && ntohs(udp_header->dest) <= PORT_1023))
         {
-            /* printk(KERN_INFO "%s: fell for dport\n", __func__); */
-
             goto l_cleanup;
         }
     } /* Note: Nothing ICMP specific */
@@ -511,7 +498,6 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
     /* Note: We will get no common bits for DIRECTION_UNKNOWN, or if the rule
      *       doesn't match the packet's direction */
     if (0 == (rule->direction & direction)) {
-        printk(KERN_INFO "%s: fell for direction\n", __func__);
         goto l_cleanup;
     }
 

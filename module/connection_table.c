@@ -99,7 +99,6 @@ CONNECTION_TABLE_destroy(connection_table_t *table)
     klist_iter_init((struct klist *)&table->list, &list_iter);
     current_entry = (connection_entry_t *)klist_next(&list_iter);
 
-    printk(KERN_INFO "%s: booya\n", __func__);
     while (NULL != current_entry) {
         next_entry = (connection_entry_t *)klist_next(&list_iter);
         klist_del(&current_entry->node);
@@ -141,7 +140,6 @@ CONNECTION_TABLE_dump_data(const connection_table_t *table,
     /* XXX: Must discard the const, but not modifying it */
     klist_iter_init((struct klist *)&table->list, &list_iter);
 
-    printk(KERN_INFO "%s: enter, buffer size %lu\n", __func__, (unsigned long)remaining_length);
     while (remaining_length > 0) {
         /* 1. Get next chunk  */
         entry = (connection_entry_t *)klist_next(&list_iter); 
@@ -365,7 +363,6 @@ CONNECTION_TABLE_check(connection_table_t *table,
 
     /* 1. Filter non-TCP packets */
     if (htons(ETH_P_IP) != skb->protocol) {
-
         printk(KERN_ERR "%s: skb is not ip!\n", __func__);
         goto l_cleanup;
     }
@@ -373,7 +370,7 @@ CONNECTION_TABLE_check(connection_table_t *table,
         if (htons(ETH_P_IP) != skb->protocol) {
             printk(KERN_ERR "%s: skb is not ip!\n", __func__);
         }
-        printk(KERN_INFO "%s: ignoring non-tcp packet %p\n", __func__, skb);
+        /* printk(KERN_INFO "%s: ignoring non-tcp packet %p\n", __func__, skb); */
         goto l_cleanup;
     }
 
@@ -383,16 +380,16 @@ CONNECTION_TABLE_check(connection_table_t *table,
     cmp_result = search_entry(&table->list, skb, &entry);
     printk(KERN_INFO "%s (skb=%s): search_entry returned %d\n", __func__, SKB_str(skb), cmp_result);
     if (ENTRY_CMP_MISMATCH == cmp_result) {
-        printk(KERN_INFO "%s (skb=%s): no entry\n", __func__, SKB_str(skb));
+        /* printk(KERN_INFO "%s (skb=%s): no entry\n", __func__, SKB_str(skb)); */
         goto l_cleanup;
     }
 
     /* 3. Get sender and receiver */
-    printk(KERN_INFO "%s: calling CONNECTION_ENTRY_get_conn_by_cmp=%p...\n", __func__, entry->_vtbl->get_conn_by_cmp);
+    /* printk(KERN_INFO "%s: calling CONNECTION_ENTRY_get_conn_by_cmp=%p...\n", __func__, entry->_vtbl->get_conn_by_cmp); */
     result_get_conn = CONNECTION_ENTRY_get_conn_by_cmp(entry, cmp_result, &conn_sender, &conn_receiver);
-    printk(KERN_INFO "%s: get_conn_by_cmp returned\n", __func__);
+    /* printk(KERN_INFO "%s: get_conn_by_cmp returned\n", __func__); */
     if (!result_get_conn) {
-        printk(KERN_INFO "%s (skb=%s): invalid get conn\n", __func__, SKB_str(skb));
+        /* printk(KERN_INFO "%s (skb=%s): invalid get conn\n", __func__, SKB_str(skb)); */
         remove_entry(entry);
         *action_out = NF_DROP;
         *reason_out = REASON_ILLEGAL_VALUE;
@@ -400,11 +397,11 @@ CONNECTION_TABLE_check(connection_table_t *table,
     }
 
     /* 4. Handle TCP state machine */
-    printk(KERN_INFO "%s: beeforetcp sender=%s\n", __func__, SINGLE_CONN_str(conn_sender));
-    printk(KERN_INFO "%s: beforetcp receiver=%s\n", __func__, SINGLE_CONN_str(conn_receiver));
+    /* printk(KERN_INFO "%s: beeforetcp sender=%s\n", __func__, SINGLE_CONN_str(conn_sender)); */
+    /* printk(KERN_INFO "%s: beforetcp receiver=%s\n", __func__, SINGLE_CONN_str(conn_receiver)); */
     is_legal_traffic = tcp_machine_state(conn_sender, conn_receiver, skb, &is_removed);
-    printk(KERN_INFO "%s: afftertcp sender=%s\n", __func__, SINGLE_CONN_str(conn_sender));
-    printk(KERN_INFO "%s: aftertcp receiver=%s\n", __func__, SINGLE_CONN_str(conn_receiver));
+    /* printk(KERN_INFO "%s: afftertcp sender=%s\n", __func__, SINGLE_CONN_str(conn_sender)); */
+    /* printk(KERN_INFO "%s: aftertcp receiver=%s\n", __func__, SINGLE_CONN_str(conn_receiver)); */
     /* 3. Check if the traffic is legal, drop illegal traffic */
     if (is_legal_traffic) {
         *action_out = NF_ACCEPT;
@@ -425,7 +422,7 @@ CONNECTION_TABLE_check(connection_table_t *table,
 
     /* 6. Call the hook */
     CONNECTION_ENTRY_hook(entry, skb);
-    printk(KERN_INFO "%s (skb %s): called hook\n", __func__, SKB_str(skb));
+    /* printk(KERN_INFO "%s (skb %s): called hook\n", __func__, SKB_str(skb)); */
 
 l_cleanup:
 
@@ -522,7 +519,7 @@ search_entry(struct klist *entries_list,
 static void
 remove_entry(connection_entry_t *entry)
 {
-    printk(KERN_INFO "%s: booya\n", __func__);
+    /* printk(KERN_INFO "%s: booya\n", __func__); */
     if (NULL != entry) {
         klist_del(&entry->node);
         CONNECTION_ENTRY_destroy(entry);
