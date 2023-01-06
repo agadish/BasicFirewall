@@ -627,7 +627,7 @@ proxy_entry_is_to_server(proxy_connection_entry_t *pentry,
     is_src_ip_from_localhost = (0 == local_ip);
     is_src_port_misconfigured = ((0 == pentry->server_conn->proxy_port) &&
                                  (TCP_CLOSE == pentry->server_conn->opener.state));
-    is_src_port_match = tcp_header->source == pentry->client_conn->proxy_port;
+    is_src_port_match = tcp_header->source == pentry->server_conn->proxy_port;
     is_dst_ip_match = (ip_header->daddr == pentry->server_conn->listener.id.src_ip);
     is_dst_port_match = (tcp_header->dest == pentry->server_conn->listener.id.src_port);
 

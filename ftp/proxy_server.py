@@ -97,8 +97,8 @@ class ClientHandler(object):
         self._reactor = reactor
 
     def unregister_from_reactor(self):
-        reactor.unregister_read(self.client_socket.fileno())
-        reactor.unregister_read(self.server_socket.fileno())
+        self._reactor.unregister_read(self.client_socket.fileno())
+        self._reactor.unregister_read(self.server_socket.fileno())
 
     def handle_client_request(self):
         raise NotImplementedError()

@@ -18,20 +18,11 @@ class FTPClientHandler(proxy_server.ClientHandler):
 
     def handle_server_response(self):
         print('handle_server_response!')
-        try:
-            response = ftp.client.FTPResponse(self.server_socket)
-            response.begin()
-            data = response.read()
-        except Exception as e:
-            # Connection is closed
-            print('Break by exception %s' % (e, ))
+        data = self.server_socket.recv(1024 * 1024)
+        if not data:
             self.unregister_from_reactor()
-
-        if not response:
-            self.unregister_from_reactor()
-
-        self.client_socket.send(response)
-
+        # XXX: We assume no fragmentation
+        self.client_socket.send(data)
 
 class FTPProxy(proxy_server.ProxyServer):
     def __init__(self, listen_port=FTP_PROXY_PORT):
