@@ -45,9 +45,10 @@
 #define CONNECTION_ENTRY_cmp_pre_routing(entry, skb) (_ENTRY_VTBL((entry))->cmp_pre_routing((connection_entry_t *)(entry), (skb)))
 #define CONNECTION_ENTRY_cmp_local_out(entry, skb) (_ENTRY_VTBL((entry))->cmp_local_out((connection_entry_t *)(entry), (skb)))
 #define CONNECTION_ENTRY_dump(entry, buf, buflen) (_ENTRY_VTBL((entry))->dump((connection_entry_t *)(entry), (buf), (buflen)))
+#define CONNECTION_ENTRY_get_conn_by_cmp(entry, cmp_res, src_out, dst_out) (_ENTRY_VTBL((entry))->get_conn_by_cmp((entry), (cmp_res), (src_out), (dst_out)))
+#define CONNECTION_ENTRY_is_closed(entry) (_ENTRY_VTBL((entry))->is_closed((connection_entry_t *)(entry)))
 
 #define IS_PROXY_ENTRY(entry) (CONNECTION_TYPE_PROXY == _ENTRY_VTBL((entry))->type)
-#define CONNECTION_ENTRY_get_conn_by_cmp(entry, cmp_res, src_out, dst_out) (_ENTRY_VTBL((entry))->get_conn_by_cmp((entry), (cmp_res), (src_out), (dst_out)))
 
 #define CMP_IS_SERVER_TO_CLIENT(cmp) ((PACKET_DIRECTION_FROM_SERVER == (cmp)) || (PACKET_DIRECTION_TO_CLIENT == (cmp)))
 
@@ -94,11 +95,14 @@ typedef size_t (*dump_entry_f)(const connection_entry_t *entry,
                              size_t buffer_size);
 
 
+typedef bool_t (*entry_is_closed_f)(connection_entry_t *entry);
+
 /*   S T R U C T S   */
 typedef struct connection_entry_vtbl_s {
     connection_type_t type;
     entry_create_f create;
     entry_destroy_f destroy;
+    entry_is_closed_f is_closed;
     entry_init_by_skb_f init_by_skb;
     entry_hook_f pre_routing_hook;
     entry_hook_f local_out_hook;

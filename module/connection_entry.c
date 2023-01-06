@@ -19,6 +19,11 @@
 #include "fw_results.h"
 
 
+/*   M A C R O S   */
+#define IS_SCONN_CLOSED(sconn) (TCP_CLOSE == (sconn).state)
+#define CONNECTION_IS_CLOSED(conn) (IS_SCONN_CLOSED((conn)->opener) && IS_SCONN_CLOSED((conn)->listener))
+
+
 /*   F U N C T I O N S   D E C L A R A T I O N S   */
 static void
 entry_init_by_skb(connection_entry_t *entry,
@@ -125,6 +130,12 @@ static void
 conn_init_by_skb(connection_t *conn,
                  const struct sk_buff *skb);
 
+static bool_t
+entry_is_closed(connection_entry_t *entry);
+
+static bool_t
+proxy_entry_is_closed(proxy_connection_entry_t *entry);
+
 
 /* static void */
 /* conn_init_by_inverse_conn(connection_t *conn, */
@@ -140,6 +151,7 @@ connection_entry_vtbl_t g_vtable_connection_direct = {
     .type = CONNECTION_TYPE_DIRECT,
     .create = entry_create,
     .destroy = entry_destroy,
+    .is_closed = entry_is_closed,
     .init_by_skb = entry_init_by_skb,
     .pre_routing_hook = NULL,
     .local_out_hook = NULL,
@@ -153,6 +165,8 @@ connection_entry_vtbl_t g_vtable_connection_proxy = {
     .type = CONNECTION_TYPE_PROXY,
     .create = (entry_create_f)proxy_entry_create,
     .destroy = (entry_destroy_f)proxy_entry_destroy,
+    .is_closed = (entry_is_closed_f)proxy_entry_is_closed,
+    .init_by_skb = entry_init_by_skb,
     .init_by_skb = (entry_init_by_skb_f)proxy_entry_init_by_skb,
     .pre_routing_hook = (entry_hook_f)proxy_entry_pre_routing_hook,
     .local_out_hook = (entry_hook_f)proxy_entry_local_out_hook,
@@ -575,8 +589,8 @@ proxy_entry_is_to_client(proxy_connection_entry_t *pentry,
     /* Note: On LOCAL-OUT hook, we get the skb->dev to be NULL so the soruce IP
      *       is not set correctly. We will treat it as zero */
     printk(KERN_INFO "%s (skb=%s): local_ip=0x%.8x\n", __func__, SKB_str(skb), ntohl(local_ip));
-    is_src_ip_from_localhost = (0 == local_ip);
-    is_src_port_match = tcp_header->source == pentry->client_conn->proxy_port;
+    is_src_ip_from_localhost = (ip_header->saddr == local_ip) || (0 == local_ip);
+    is_src_port_match = (tcp_header->source == pentry->client_conn->proxy_port);
     is_dst_ip_match = (ip_header->daddr == pentry->client_conn->listener.id.dst_ip);
     is_dst_port_match = (tcp_header->dest == pentry->client_conn->listener.id.dst_port);
 
@@ -584,12 +598,11 @@ proxy_entry_is_to_client(proxy_connection_entry_t *pentry,
                   is_src_port_match &&
                   is_dst_ip_match &&
                   is_dst_port_match) ? TRUE : FALSE;
-    /* printk(KERN_INFO "%s (skb=%s): local_ip=0x%.8x, proxy: proxy_port=%d, 0x%.8x:%d->0x%.8x:%d. results: %d %d %d %d -> %d\n", */
-    /*         __func__, SKB_str(skb), ntohl(local_ip), ntohs(proxy_conn->proxy_port), */
-    /*         ntohl(proxy_conn->id.src_ip), ntohs(proxy_conn->id.src_port), */
-    /*         ntohl(proxy_conn->id.dst_ip), ntohs(proxy_conn->id.dst_port), */
-    /*         is_src_ip_from_localhost, is_src_port_match, */
-    /*         is_dst_ip_match, is_dst_port_match, does_match); */
+    printk(KERN_INFO "%s (skb=%s): local_ip=0x%.8x, entry=%s. results: %d %d %d %d -> %d\n",
+            __func__, SKB_str(skb), ntohl(local_ip),
+            ENTRY_str((connection_entry_t *)pentry),
+            is_src_ip_from_localhost, is_src_port_match,
+            is_dst_ip_match, is_dst_port_match, does_match);
 
     return does_match;
 }
@@ -655,7 +668,7 @@ proxy_entry_pre_routing_hook(proxy_connection_entry_t *entry,
             printk(KERN_ERR "%s (skb=%s): dest addr from server is 0\n", __func__, SKB_str(skb));
             /* XXX: log? */
         }
-        tcp_header->dest = entry->client_conn->proxy_port;
+        tcp_header->dest = entry->server_conn->proxy_port;
         printk(KERN_INFO "%s: from server: dest to 0x%.8x:%d\n", __func__,
                 ntohl(ip_header->daddr), ntohs(tcp_header->dest));
         break;
@@ -995,3 +1008,29 @@ proxy_entry_get_conn_by_cmp(proxy_connection_entry_t *entry,
 
     return is_success;
 }
+
+static bool_t
+entry_is_closed(connection_entry_t *entry)
+{
+    bool_t is_closed = TRUE;
+    
+    if (NULL != entry) {
+        is_closed = CONNECTION_IS_CLOSED(entry->conn);
+    }
+
+    return is_closed;
+}
+
+static bool_t
+proxy_entry_is_closed(proxy_connection_entry_t *pentry)
+{
+    bool_t is_closed = TRUE;
+    
+    if (NULL != pentry) {
+        is_closed = (CONNECTION_IS_CLOSED(pentry->server_conn) &&
+                     CONNECTION_IS_CLOSED(pentry->client_conn));
+    }
+
+    return is_closed;
+}
+

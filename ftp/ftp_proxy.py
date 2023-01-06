@@ -9,7 +9,7 @@ FTP_PROXY_PORT = 210
 class FTPClientHandler(proxy_server.ClientHandler):
     def handle_client_request(self):
         print('handle_client_request!')
-        data = self.client_socket.read()
+        data = self.client_socket.recv(1024 * 1024)
         if not data:
             # Connection is closed
             self.unregister_from_reactor()

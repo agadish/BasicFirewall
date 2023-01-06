@@ -81,7 +81,7 @@ class ConnectionEntry(object):
 
 class ClientHandler(object):
     def __init__(self, connection_entry):
-        self._entry = entry
+        self._entry = connection_entry
 
     @property
     def client_socket(self):
@@ -96,7 +96,7 @@ class ClientHandler(object):
         reactor.register_read(self.server_socket.fileno(), self.handle_server_response)
         self._reactor = reactor
 
-    def uregister_from_reactor(self):
+    def unregister_from_reactor(self):
         reactor.unregister_read(self.client_socket.fileno())
         reactor.unregister_read(self.server_socket.fileno())
 
@@ -116,6 +116,7 @@ class ProxyServer(object):
         self._is_listening = False
         self._connections = list()
         self._reactor = Reactor()
+        # TODO: remove
         self._clients_junk = list()
 
     def listen(self):

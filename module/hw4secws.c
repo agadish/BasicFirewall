@@ -403,6 +403,7 @@ fw_hook__existing_connection(struct sk_buff *skb, __u8 *nf_action__out)
     __u8 action = NF_DROP;
     packet_direction_t conns_match = PACKET_DIRECTION_MISMATCH;
 
+    printk(KERN_INFO "%s (skb=%s): enter\n", __func__, SKB_str(skb));
     /* 1. Handle only TCP packets */
     if (IPPROTO_TCP != ip_hdr(skb)->protocol) {
         printk(KERN_INFO "%s: ignoring non-TCP packet (%d)\n", __func__,
@@ -417,6 +418,7 @@ fw_hook__existing_connection(struct sk_buff *skb, __u8 *nf_action__out)
     conns_match = CONNECTION_TABLE_check(g_connection_table, skb, &action);
     if (PACKET_DIRECTION_MISMATCH != conns_match) {
         is_handled = TRUE;
+        action = NF_ACCEPT;
         printk(KERN_INFO "%s: has a conn match!\n", __func__);
     }
 
@@ -437,6 +439,7 @@ fw_hook__route_table(struct sk_buff *skb, __u8 *nf_action__out)
     __u8 action = NF_DROP;
     reason_t reason = REASON_FW_INACTIVE;
 
+    printk(KERN_INFO "%s (skb=%s): enter\n", __func__, SKB_str(skb));
     /* 1. Check if the packet matches the rule table.
      *    XXX: If the rule table allows the packet to pass it will also fulfil
      *    the accept reason, and this hook WON'T HANDLE THE PACKET and pass it
@@ -467,19 +470,19 @@ fw_hook__connection_table_add(struct sk_buff *skb, __u8 *nf_action__out)
     bool_t is_handled = FALSE;
     __u8 action = NF_DROP;
     reason_t reason = REASON_FW_INACTIVE;
+    printk(KERN_INFO "%s (skb=%s): enter\n", __func__, SKB_str(skb));
 
     if (IPPROTO_TCP == ip_hdr(skb)->protocol) {
         /* For sure it has syn */
-        is_handled = TRUE;
         if ((tcp_hdr(skb)->syn) &&
             (!tcp_hdr(skb)->ack) &&
             (!tcp_hdr(skb)->rst) &&
             (!tcp_hdr(skb)->fin)) {
             /* Ignore failure */
-            printk(KERN_INFO "%s: handling accpeted syn\n", __func__);
+            printk(KERN_INFO "%s: handling accepted syn\n", __func__);
             (void)CONNECTION_TABLE_handle_accepted_syn(g_connection_table, skb);
-            action = NF_ACCEPT;
         } else {
+            is_handled = TRUE;
             action = NF_DROP;
             (void)CONNECTION_TABLE_drop_entry_by_skb(g_connection_table, skb);
             printk(KERN_ERR "%s (skb=%s): first packet is not syn\n", __func__,
@@ -502,7 +505,11 @@ static bool_t
 fw_hook__collector(struct sk_buff *skb, __u8 *nf_action__out)
 {
     bool_t is_handled = TRUE;
+    printk(KERN_INFO "%s (skb=%s): enter\n", __func__, SKB_str(skb));
+
+    UNUSED_ARG(skb);
     *nf_action__out = NF_ACCEPT;
+
     return is_handled;
 }
 
@@ -514,6 +521,7 @@ fw_hook__local_out_connection(struct sk_buff *skb, __u8 *nf_action__out)
     __u8 action = NF_DROP;
     packet_direction_t conns_match = PACKET_DIRECTION_MISMATCH;
 
+    printk(KERN_INFO "%s (skb=%s): enter\n", __func__, SKB_str(skb));
     /* 1. Handle only TCP packets */
     if (IPPROTO_TCP != ip_hdr(skb)->protocol) {
         printk(KERN_INFO "%s: ignoring non-TCP packet (%d)\n", __func__,
@@ -529,6 +537,7 @@ fw_hook__local_out_connection(struct sk_buff *skb, __u8 *nf_action__out)
     if (PACKET_DIRECTION_MISMATCH != conns_match) {
         /* Found a connection, handle by NF_ACCEPT */
         is_handled = TRUE;
+        action = NF_ACCEPT;
         printk(KERN_INFO "%s: has a conn match!\n", __func__);
     }
 
@@ -591,10 +600,10 @@ hw4secws_hookfn_local_out(void *priv,
         }
     }
 
+    printk(KERN_INFO "%s (skb=%s): action %d\n", __func__, SKB_str(skb), action);
+
     return (unsigned int)action;
 }
-
-
 
 static unsigned int
 hw4secws_hookfn_pre_routing(void *priv,
@@ -616,6 +625,9 @@ hw4secws_hookfn_pre_routing(void *priv,
         /* For TCP SYN packets, add a connection entry */
         fw_hook__connection_table_add,
 
+        /* Handle TCP-state of an existing connection entry */
+        fw_hook__existing_connection,
+
         /* Accept all packets */
         fw_hook__collector
     };
@@ -627,6 +639,8 @@ hw4secws_hookfn_pre_routing(void *priv,
             break;
         }
     }
+
+    printk(KERN_INFO "%s (skb=%s): action %d\n", __func__, SKB_str(skb), action);
 
     return (unsigned int)action;
 }
