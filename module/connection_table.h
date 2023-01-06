@@ -60,8 +60,6 @@ CONNECTION_TABLE_dump_data(const connection_table_t *table,
  * @param[in] skb The packet to check
  * @param[out] action_out The decision made by the function, valid only if the
  *             function returned TRUE. can be eiter NF_ACCEPT or NF_DROP
- * @param[out] reason_out The reason to the decision. Can be either one of
- *                        reason_t values, or the connection id casted to reason_t.
  *
  * @return PACKET_DIRECTION_MISMATCH if was not handled, other values if handled
  *
@@ -71,8 +69,11 @@ CONNECTION_TABLE_dump_data(const connection_table_t *table,
 packet_direction_t
 CONNECTION_TABLE_check(connection_table_t *table,
                        struct sk_buff *skb,
-                       __u8 *action_out,
-                       reason_t *reason_out);
+                       __u8 *action_out);
+
+packet_direction_t
+CONNECTION_TABLE_check_local_out(connection_table_t *table,
+                       struct sk_buff *skb);
 
 result_t
 CONNECTION_TABLE_assign_proxy(connection_table_t *table,
@@ -81,9 +82,14 @@ CONNECTION_TABLE_assign_proxy(connection_table_t *table,
 result_t
 CONNECTION_TABLE_handle_accepted_syn(connection_table_t *table,
                                      const struct sk_buff *skb);
+
 bool_t
 CONNECTION_TABLE_track_local_out(connection_table_t *table,
                                  struct sk_buff *skb);
+
+result_t
+CONNECTION_TABLE_drop_entry_by_skb(connection_table_t *table,
+                                   struct sk_buff *skb);
 
 
 #endif /* __CONNECTION_TABLE_H__ */

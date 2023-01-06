@@ -345,8 +345,7 @@ l_cleanup:
 packet_direction_t
 CONNECTION_TABLE_check(connection_table_t *table,
                        struct sk_buff *skb,
-                       __u8 *action_out,
-                       reason_t *reason_out)
+                       __u8 *action_out)
 {
     packet_direction_t cmp_result = PACKET_DIRECTION_MISMATCH;
     bool_t is_legal_traffic = TRUE;
@@ -357,7 +356,7 @@ CONNECTION_TABLE_check(connection_table_t *table,
     bool_t is_removed = FALSE;
 
     /* 0. Input validation */
-    if ((NULL == table) || (NULL == skb) || (NULL == action_out) || (NULL == reason_out)) {
+    if ((NULL == table) || (NULL == skb) || (NULL == action_out)) {
         printk(KERN_WARNING "CONNECTION_TABLE_check got invalid input\n");
         goto l_cleanup;
     }
@@ -393,7 +392,6 @@ CONNECTION_TABLE_check(connection_table_t *table,
         /* printk(KERN_INFO "%s (skb=%s): invalid get conn\n", __func__, SKB_str(skb)); */
         remove_entry(entry);
         *action_out = NF_DROP;
-        *reason_out = REASON_ILLEGAL_VALUE;
         goto l_cleanup;
     }
 
@@ -406,8 +404,6 @@ CONNECTION_TABLE_check(connection_table_t *table,
     /* 3. Check if the traffic is legal, drop illegal traffic */
     if (is_legal_traffic) {
         *action_out = NF_ACCEPT;
-        /* TODO: Don't log */
-        *reason_out = 0;
         if (is_removed) {
             printk(KERN_INFO "%s (skb=%s): got rst, removing entry\n", __func__, SKB_str(skb));
             remove_entry(entry);
@@ -417,12 +413,93 @@ CONNECTION_TABLE_check(connection_table_t *table,
         /* Drop the entry */
         remove_entry(entry);
         *action_out = NF_DROP;
-        *reason_out = REASON_ILLEGAL_VALUE;
         goto l_cleanup;
     }
 
     /* 6. Call the hook */
     CONNECTION_ENTRY_pre_routing_hook(entry, skb, cmp_result);
+    /* printk(KERN_INFO "%s (skb %s): called hook\n", __func__, SKB_str(skb)); */
+
+l_cleanup:
+
+    return cmp_result;
+}
+
+packet_direction_t
+CONNECTION_TABLE_check_local_out(connection_table_t *table,
+                       struct sk_buff *skb)
+{
+    packet_direction_t cmp_result = PACKET_DIRECTION_MISMATCH;
+    bool_t is_legal_traffic = TRUE;
+    connection_entry_t *entry = NULL;
+    single_connection_t *conn_sender = NULL;
+    single_connection_t *conn_receiver = NULL;
+    bool_t result_get_conn = FALSE;
+    bool_t is_removed = FALSE;
+
+    /* TODO: remove is_legal_traffic - we only want to remove by RST/FINs. Let the
+     *       TCP stack do the job */
+    /* TODO: remove entry only after both ends are removed */
+    /* 0. Input validation */
+    if ((NULL == table) || (NULL == skb)) {
+        printk(KERN_WARNING "CONNECTION_TABLE_check got invalid input\n");
+        goto l_cleanup;
+    }
+
+    /* 1. Filter non-TCP packets */
+    if (htons(ETH_P_IP) != skb->protocol) {
+        printk(KERN_ERR "%s: skb is not ip!\n", __func__);
+        goto l_cleanup;
+    }
+    if (IPPROTO_TCP != ip_hdr(skb)->protocol) {
+        if (htons(ETH_P_IP) != skb->protocol) {
+            printk(KERN_ERR "%s: skb is not ip!\n", __func__);
+        }
+        /* printk(KERN_INFO "%s: ignoring non-tcp packet %p\n", __func__, skb); */
+        goto l_cleanup;
+    }
+
+    /* 1. Check if exists on the table */
+    /* Note: For SYN packets it won't match, and the handling will be done here...
+     *       Unless, a connection exists for this SYN packet, and it will be handled accordingly */
+    cmp_result = search_entry__pre_routing(&table->list, skb, &entry);
+    printk(KERN_INFO "%s (skb=%s): search_entry returned %d\n", __func__, SKB_str(skb), cmp_result);
+    if (PACKET_DIRECTION_MISMATCH == cmp_result) {
+        /* printk(KERN_INFO "%s (skb=%s): no entry\n", __func__, SKB_str(skb)); */
+        goto l_cleanup;
+    }
+
+    /* 3. Get sender and receiver */
+    /* printk(KERN_INFO "%s: calling CONNECTION_ENTRY_get_conn_by_cmp=%p...\n", __func__, entry->_vtbl->get_conn_by_cmp); */
+    result_get_conn = CONNECTION_ENTRY_get_conn_by_cmp(entry, cmp_result, &conn_sender, &conn_receiver);
+    /* printk(KERN_INFO "%s: get_conn_by_cmp returned\n", __func__); */
+    if (!result_get_conn) {
+        /* printk(KERN_INFO "%s (skb=%s): invalid get conn\n", __func__, SKB_str(skb)); */
+        remove_entry(entry);
+        goto l_cleanup;
+    }
+
+    /* 4. Handle TCP state machine */
+    /* printk(KERN_INFO "%s: beeforetcp sender=%s\n", __func__, SINGLE_CONN_str(conn_sender)); */
+    /* printk(KERN_INFO "%s: beforetcp receiver=%s\n", __func__, SINGLE_CONN_str(conn_receiver)); */
+    is_legal_traffic = tcp_machine_state(conn_sender, conn_receiver, skb, &is_removed);
+    /* printk(KERN_INFO "%s: afftertcp sender=%s\n", __func__, SINGLE_CONN_str(conn_sender)); */
+    /* printk(KERN_INFO "%s: aftertcp receiver=%s\n", __func__, SINGLE_CONN_str(conn_receiver)); */
+    /* 3. Check if the traffic is legal, drop illegal traffic */
+    if (is_legal_traffic) {
+        if (is_removed) {
+            printk(KERN_INFO "%s (skb=%s): got rst, removing entry\n", __func__, SKB_str(skb));
+            remove_entry(entry);
+            goto l_cleanup;
+        }
+    } if (!is_legal_traffic) {
+        /* Drop the entry */
+        remove_entry(entry);
+        goto l_cleanup;
+    }
+
+    /* 6. Call the hook */
+    CONNECTION_ENTRY_local_out_hook(entry, skb, cmp_result);
     /* printk(KERN_INFO "%s (skb %s): called hook\n", __func__, SKB_str(skb)); */
 
 l_cleanup:
@@ -563,3 +640,32 @@ remove_entry(connection_entry_t *entry)
     }
 }
 
+
+result_t
+CONNECTION_TABLE_drop_entry_by_skb(connection_table_t *table,
+                                   struct sk_buff *skb)
+{
+    result_t result = E__UNKNOWN;
+    packet_direction_t direction = PACKET_DIRECTION_MISMATCH;
+    connection_entry_t *entry = NULL;
+
+
+    /* 0. Input validation */
+    if ((NULL == table) || (NULL == skb)) {
+        result = E__NULL_INPUT;
+        goto l_cleanup;
+    }
+
+    direction = search_entry__pre_routing(&table->list,
+                                          skb,
+                                          &entry);
+    /* If entry not found - return success */
+    if (PACKET_DIRECTION_MISMATCH != direction) {
+        remove_entry(entry);
+    }
+
+    result = E__SUCCESS;
+l_cleanup:
+
+    return result;
+}

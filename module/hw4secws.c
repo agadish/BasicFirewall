@@ -37,6 +37,30 @@ MODULE_LICENSE("GPL");
 #define SYSFS_CONNS_FILE_NAME "conns"
 
 
+/*   T Y P E D E F S   */
+/**
+ * @brief The function prototype of a firmware hook
+ *
+ * This is the prototype of a internal hooks framework that is build upon the
+ * module's netfilter hook points (NF_INET_PRE_ROUTING, NF_INET_LOCAL_OUT).
+ * The NF handler contains an array of fw_hook_f, that are called sequentally.
+ * Each hook decides whether to handle the packet and thus prevent next hooks
+ * from being called, or to ignore the packet and pass it to the next hook in
+ * the array to handle.
+ *
+ * Deciding to handle a packet is done by returning TRUE and assigning
+ * nf_action__out value, and ignoring a packet is done by returning FALSE.
+ *
+ * @param[in] skb The packet to hook
+ * @param[out] nf_action__out The decided netfilter action (NF_ACCEPT or
+ *                            NF_DROP), that is returned iff the hook decides
+ *                            to handle the packet
+ *
+ * @return TRUE if the hook handled the packet, FALSE if it didn't handle the packet
+ */
+typedef bool_t (*fw_hook_f)(struct sk_buff *skb, __u8 *nf_action__out);
+
+
 /*   F U N C T I O N S    D E C L A R A T I O N S   */
 /**
  * @brief Init the module by registering all hooks
@@ -63,6 +87,8 @@ __exit hw4secws_exit(void);
  */
 /* static void */
 /* log_drop(void); */
+static bool_t
+fw_hook__unknown_protocol_or_xmas(struct sk_buff *skb, __u8 *nf_action__out);
 
 /**
  * @brief The netfilter hook of the driver on PRE_ROUTING chain
@@ -74,11 +100,9 @@ __exit hw4secws_exit(void);
  * @return NF_ACCEPT
  */
 static unsigned int
-hw4secws_hookfn_pre_routing(
-    void *priv,
-    struct sk_buff *skb,
-    const struct nf_hook_state *state
-);
+hw4secws_hookfn_pre_routing(void *priv,
+                            struct sk_buff *skb,
+                            const struct nf_hook_state *state);
 
 /**
  * @brief The netfilter hook of the driver on LOCAL_OUT chain
@@ -90,11 +114,9 @@ hw4secws_hookfn_pre_routing(
  * @return NF_ACCEPT
  */
 static unsigned int
-hw4secws_hookfn_local_out(
-    void *priv,
-    struct sk_buff *skb,
-    const struct nf_hook_state *state
-);
+hw4secws_hookfn_local_out(void *priv,
+                          struct sk_buff *skb,
+                          const struct nf_hook_state *state);
 
 /**
  * @brief Initialise the class and both drivers (log, rules)
@@ -332,8 +354,195 @@ static DEVICE_ATTR(conns, S_IRUGO, conns_display, NULL);
 /* proxy connecion table file */
 /* static DEVICE_ATTR(proxy_conns, S_IWUSR | S_IRUGO, NULL, proxy_conns_assign);  */
 
+static bool_t
+fw_hook__unknown_protocol_or_xmas(struct sk_buff *skb, __u8 *nf_action__out);
+
+static bool_t
+fw_hook__existing_connection(struct sk_buff *skb, __u8 *nf_action__out);
+
+static bool_t
+fw_hook__route_table(struct sk_buff *skb, __u8 *nf_action__out);
+
+static bool_t
+fw_hook__connection_table_add(struct sk_buff *skb, __u8 *nf_action__out);
+
+static bool_t
+fw_hook__collector(struct sk_buff *skb, __u8 *nf_action__out);
+
 
 /*   F U N C T I O N S    I M P L E M E N T A T I O N S   */
+static bool_t
+fw_hook__unknown_protocol_or_xmas(struct sk_buff *skb, __u8 *nf_action__out)
+{
+    bool_t is_handled = FALSE;
+    __u8 action = NF_DROP;
+
+    if (RULE_TABLE_is_xmas_packet(skb)) {
+        /* 1. Check if xmas packet, if so then drop and log */
+        is_handled = TRUE;
+        action = NF_DROP;
+        (void)FW_LOG_log_match(skb, action, REASON_XMAS_PACKET);
+    } else if (RULE_TABLE_is_freepass(&g_rule_table, skb)) {
+        /* 2. Accept freepass list packets without logging them:
+         *    loopbacks packets, or non-TCP/UDP/ICMP packets */
+        is_handled = TRUE;
+        action = NF_ACCEPT;
+    }
+
+    if (is_handled) {
+        *nf_action__out = action;
+    }
+
+    return is_handled;
+}
+
+static bool_t
+fw_hook__existing_connection(struct sk_buff *skb, __u8 *nf_action__out)
+{
+    bool_t is_handled = FALSE;
+    __u8 action = NF_DROP;
+    packet_direction_t conns_match = PACKET_DIRECTION_MISMATCH;
+
+    /* 1. Handle only TCP packets */
+    if (IPPROTO_TCP != ip_hdr(skb)->protocol) {
+        printk(KERN_INFO "%s: ignoring non-TCP packet (%d)\n", __func__,
+               ip_hdr(skb)->protocol);
+        is_handled = FALSE;
+        goto l_cleanup;
+    }
+
+    /* 2. Do the handling and get the packet direction.
+     *    Any non-PACKET_DIRECTION_MISMATCH return value means that the
+     *    connection exists in the table and the packet was handled */
+    conns_match = CONNECTION_TABLE_check(g_connection_table, skb, &action);
+    if (PACKET_DIRECTION_MISMATCH != conns_match) {
+        is_handled = TRUE;
+        printk(KERN_INFO "%s: has a conn match!\n", __func__);
+    }
+
+    if (is_handled) {
+        *nf_action__out = action;
+    }
+
+l_cleanup:
+
+    return is_handled;
+}
+
+static bool_t
+fw_hook__route_table(struct sk_buff *skb, __u8 *nf_action__out)
+{
+    bool_t is_handled = FALSE;
+    bool_t does_match_rule_table = FALSE;
+    __u8 action = NF_DROP;
+    reason_t reason = REASON_FW_INACTIVE;
+
+    /* 1. Check if the packet matches the rule table.
+     *    XXX: If the rule table allows the packet to pass it will also fulfil
+     *    the accept reason, and this hook WON'T HANDLE THE PACKET and pass it
+     *    to the next hook in the array.
+     *    If the rule table doesn't allow the packet, handle it by dropping it.
+     */
+    does_match_rule_table = RULE_TABLE_check(&g_rule_table, skb, &action, &reason);
+    if (!does_match_rule_table) {
+        /* 2. If it doesn't match the rule table - handle the packet by dropping it */
+        is_handled = TRUE;
+        action = NF_DROP;
+        reason = REASON_NO_MATCHING_RULE;
+    }
+    /* 2. If it DOES match the rule table - don't handle the packet! */
+
+    if (is_handled) {
+        *nf_action__out = action;
+    }
+    /* 3. Log match */
+    (void)FW_LOG_log_match(skb, action, reason);
+
+    return is_handled;
+}
+
+static bool_t
+fw_hook__connection_table_add(struct sk_buff *skb, __u8 *nf_action__out)
+{
+    bool_t is_handled = FALSE;
+    __u8 action = NF_DROP;
+    reason_t reason = REASON_FW_INACTIVE;
+
+    if (IPPROTO_TCP == ip_hdr(skb)->protocol) {
+        /* For sure it has syn */
+        is_handled = TRUE;
+        if ((tcp_hdr(skb)->syn) &&
+            (!tcp_hdr(skb)->ack) &&
+            (!tcp_hdr(skb)->rst) &&
+            (!tcp_hdr(skb)->fin)) {
+            /* Ignore failure */
+            printk(KERN_INFO "%s: handling accpeted syn\n", __func__);
+            (void)CONNECTION_TABLE_handle_accepted_syn(g_connection_table, skb);
+            action = NF_ACCEPT;
+        } else {
+            action = NF_DROP;
+            (void)CONNECTION_TABLE_drop_entry_by_skb(g_connection_table, skb);
+            printk(KERN_ERR "%s (skb=%s): first packet is not syn\n", __func__,
+                   SKB_str(skb));
+        }
+    } else {
+        printk(KERN_INFO "%s: skipping non-tcp packet\n", __func__);
+    }
+
+    if (is_handled) {
+        *nf_action__out = action;
+    }
+    /* 3. Log match */
+    (void)FW_LOG_log_match(skb, action, reason);
+
+    return is_handled;
+}
+
+static bool_t
+fw_hook__collector(struct sk_buff *skb, __u8 *nf_action__out)
+{
+    bool_t is_handled = TRUE;
+    *nf_action__out = NF_ACCEPT;
+    return is_handled;
+}
+
+
+static bool_t
+fw_hook__local_out_connection(struct sk_buff *skb, __u8 *nf_action__out)
+{
+    bool_t is_handled = FALSE;
+    __u8 action = NF_DROP;
+    packet_direction_t conns_match = PACKET_DIRECTION_MISMATCH;
+
+    /* 1. Handle only TCP packets */
+    if (IPPROTO_TCP != ip_hdr(skb)->protocol) {
+        printk(KERN_INFO "%s: ignoring non-TCP packet (%d)\n", __func__,
+               ip_hdr(skb)->protocol);
+        is_handled = FALSE;
+        goto l_cleanup;
+    }
+
+    /* 2. Do the handling and get the packet direction.
+     *    Any non-PACKET_DIRECTION_MISMATCH return value means that the
+     *    connection exists in the table and the packet was handled */
+    conns_match = CONNECTION_TABLE_check_local_out(g_connection_table, skb);
+    if (PACKET_DIRECTION_MISMATCH != conns_match) {
+        /* Found a connection, handle by NF_ACCEPT */
+        is_handled = TRUE;
+        printk(KERN_INFO "%s: has a conn match!\n", __func__);
+    }
+
+    if (is_handled) {
+        *nf_action__out = action;
+    }
+
+l_cleanup:
+
+    return is_handled;
+}
+
+
+
 static ssize_t
 fw_log_read(struct file *fw_log_file,
             char __user *user_buffer,
@@ -360,111 +569,63 @@ fw_log_release(struct inode *fw_log_inode, struct file *fw_log_file)
 }
 
 static unsigned int
-hw4secws_hookfn_local_out(
-    void *priv,
-    struct sk_buff *skb,
-    const struct nf_hook_state *state
-){
-    __u8 action = NF_ACCEPT;
-    packet_direction_t conns_match = PACKET_DIRECTION_MISMATCH;
-    reason_t reason = REASON_FW_INACTIVE;
+hw4secws_hookfn_local_out(void *priv,
+                          struct sk_buff *skb,
+                          const struct nf_hook_state *state)
+{
+    __u8 action = NF_DROP;
+    bool_t is_handled = FALSE;
+    fw_hook_f local_out_hooks[] = {
+        /* Handle existing connections - spoof the source */
+        fw_hook__local_out_connection,
 
-    UNUSED_ARG(priv);
-    UNUSED_ARG(state);
+        /* Accept all packets */
+        fw_hook__collector
+    };
+    size_t i = 0;
 
-    /* 1. Check the connection */
-    printk(KERN_INFO "%s: CONNECTION_TABLE_check for skb=%s\n", __func__, SKB_str(skb));
-    conns_match = CONNECTION_TABLE_check(g_connection_table, skb, &action, &reason);
-    if (PACKET_DIRECTION_MISMATCH == conns_match) {
-        printk(KERN_ERR "%s: outgoing packet without SYN nor connection table entry! syn%d ack%d fin%d rst%d\n", __func__, tcp_hdr(skb)->syn, tcp_hdr(skb)->ack, tcp_hdr(skb)->fin, tcp_hdr(skb)->rst);
-        action = NF_DROP;
-        goto l_cleanup;
+    for (i = 0 ; i < ARRAY_LENGTH(local_out_hooks) ; ++i) {
+        is_handled = local_out_hooks[i](skb, &action);
+        if (is_handled) {
+            break;
+        }
     }
-
-    /* 2. If SYN packet the rule table */
-    /* if (tcp_hdr(skb)->syn) { */
-    /*     [> Ignore failure <] */
-    /*     (void)CONNECTION_TABLE_track_local_out(g_connection_table, skb); */
-    /* } */
-
-l_cleanup:
 
     return (unsigned int)action;
 }
 
+
+
 static unsigned int
-hw4secws_hookfn_pre_routing(
-    void *priv,
-    struct sk_buff *skb,
-    const struct nf_hook_state *state
-){
+hw4secws_hookfn_pre_routing(void *priv,
+                            struct sk_buff *skb,
+                            const struct nf_hook_state *state)
+{
     __u8 action = NF_DROP;
-    packet_direction_t conns_match = PACKET_DIRECTION_MISMATCH;
-    bool_t has_rule_match = FALSE;
-    bool_t should_log = TRUE;
-    reason_t reason = REASON_FW_INACTIVE;
+    bool_t is_handled = FALSE;
+    fw_hook_f pre_routing_hooks[] = {
+        /* Accept non-TCP/UDP/ICMP packets, drop XMAS packets */
+        fw_hook__unknown_protocol_or_xmas,
 
-    UNUSED_ARG(priv);
-    UNUSED_ARG(state);
+        /* Handle TCP-state of an existing connection entry */
+        fw_hook__existing_connection,
 
-    /* 1. Check if xmas packet */
-    if (RULE_TABLE_is_xmas_packet(skb)) {
-        action = NF_DROP;
-        reason = REASON_XMAS_PACKET;
-    } else if (RULE_TABLE_is_freepass(&g_rule_table, skb)) {
-        /* 2. Accept freepass list packets without logging them:
-         *    loopbacks packets, or non-TCP/UDP/ICMP packets */
-        should_log = FALSE;
-        action = NF_ACCEPT;
-        goto l_cleanup;
-    } else {
-        /* 3. Check the connection table */
-        printk(KERN_INFO "%s: CONNECTION_TABLE_check for skb=%s\n", __func__, SKB_str(skb));
-        conns_match = CONNECTION_TABLE_check(g_connection_table, skb, &action, &reason);
-        if (PACKET_DIRECTION_MISMATCH != conns_match) {
-            printk(KERN_INFO "%s: has a conn match!\n", __func__);
-            should_log = FALSE;
-        } else {
-            printk(KERN_INFO "%s: has no conns match, will pass to rule table\n", __func__);
-            /* 4. Check the rule table */
-            has_rule_match = RULE_TABLE_check(&g_rule_table, skb, &action, &reason);
-            if (!has_rule_match) {
-                /* 4.1. No match: drop the packet */
-                action = NF_DROP;
-                reason = REASON_NO_MATCHING_RULE;
-                goto l_cleanup;
-            }
-            /* printk(KERN_INFO "%s: has rule match\n", __func__); */
-            /* Note: If we reach here it must be a TCP syn */
-            /* 5. Matching rule - should bes SYN, update connection table */
-            if (IPPROTO_TCP == ip_hdr(skb)->protocol) {
-                /* For sure it has syn */
-                if ((tcp_hdr(skb)->syn) && (!tcp_hdr(skb)->ack)) {
-                    /* Ignore failure */
-                    printk(KERN_INFO "%s: handling accpeted syn\n", __func__);
-                    (void)CONNECTION_TABLE_handle_accepted_syn(g_connection_table, skb);
+        /* User-configured route rules for TCP, UDP, ICMP */
+        fw_hook__route_table,
 
-                    /* 6. Check the connection table once again - after inserting new rule */
-                    printk(KERN_INFO "%s: CONNECTION_TABLE_check for skb=%s first syn\n", __func__, SKB_str(skb));
-                    conns_match = CONNECTION_TABLE_check(g_connection_table, skb, &action, &reason);
-                    if (PACKET_DIRECTION_MISMATCH != conns_match) {
-                        printk(KERN_INFO "%s: has a conn match second time!\n", __func__);
-                        should_log = FALSE;
-                    }
-                } else {
-                    printk(KERN_ERR "%s: outgoing packet without SYN nor connection table entry! syn%d ack%d fin%d rst%d\n", __func__, tcp_hdr(skb)->syn, tcp_hdr(skb)->ack, tcp_hdr(skb)->fin, tcp_hdr(skb)->rst);
-                }
-            }
+        /* For TCP SYN packets, add a connection entry */
+        fw_hook__connection_table_add,
+
+        /* Accept all packets */
+        fw_hook__collector
+    };
+    size_t i = 0;
+
+    for (i = 0 ; i < ARRAY_LENGTH(pre_routing_hooks) ; ++i) {
+        is_handled = pre_routing_hooks[i](skb, &action);
+        if (is_handled) {
+            break;
         }
-    }
-
-l_cleanup:
-    printk(KERN_INFO "%s (skb=%s): finished handling, action %d reason %d\n", __func__, SKB_str(skb), action, reason);
-    /* 3. Log the packet with the action to the reason */
-    /* Note: we have nothing to do with logging failure */
-    if (should_log) {
-        printk(KERN_INFO "%s (skb=%s): logging\n", __func__, SKB_str(skb));
-        (void)FW_LOG_log_match(skb, action, reason);
     }
 
     return (unsigned int)action;

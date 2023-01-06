@@ -15,6 +15,7 @@
 #define UNUSED_ARG(a) ((void)(a))
 #define FALSE (0)
 #define TRUE (!FALSE)
+#define ARRAY_LENGTH(a) (sizeof((a)) / sizeof((a)[0]))
 
 #define KFREE_SAFE(p) do {  \
     if (NULL != (p)) {      \
