@@ -216,6 +216,19 @@ static ssize_t
 conns_display(struct device *dev, struct device_attribute *attr, char *buf);
 
 /**
+ * @brief Handle a write request from the sysfs conns driver
+ *
+ * @param[in] dev Ignored
+ * @param[in] attr Ignored
+ * @param[in] buf The buffer that will be copied to the user later. It's length
+ *                is PAGE_SIZE
+ *
+ * @return Number of bytes were written, or negative value on error
+ */
+static ssize_t
+conns_modify(struct device *dev, struct device_attribute *attr, const char *buf, size_t count);
+
+/**
  * @brief Handles a write request that creates a new proxy rule
  *
  * @param[in] dev Ignored
@@ -346,11 +359,11 @@ static connection_table_t *g_connection_table = NULL;
  * @brief The sysfs files
  */
 /* rules write/read file */
-static DEVICE_ATTR(rules, S_IWUSR | S_IRUGO, rules_display, rules_modify); 
+static DEVICE_ATTR(rules, S_IRUGO | S_IWUSR, rules_display, rules_modify); 
 /* logs reset file */
 static DEVICE_ATTR(reset, S_IWUSR, NULL, log_modify); 
 /* connecion table file */
-static DEVICE_ATTR(conns, S_IRUGO, conns_display, NULL); 
+static DEVICE_ATTR(conns, S_IRUGO | S_IWUSR, conns_display, conns_modify); 
 /* proxy connecion table file */
 /* static DEVICE_ATTR(proxy_conns, S_IWUSR | S_IRUGO, NULL, proxy_conns_assign);  */
 
@@ -1023,6 +1036,35 @@ conns_display(struct device *dev, struct device_attribute *attr, char *buf)
     }
 
     result = (ssize_t)buffer_length;
+l_cleanup:
+
+    return result;
+}
+
+static ssize_t
+conns_modify(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+    ssize_t result = 0;
+    result_t add_result = E__UNKNOWN;
+    const connection_id_t *id = NULL;
+
+    /* 1. Check if size matches */
+    if (sizeof(*id) != count) {
+        result = 0;
+        goto l_cleanup;
+    }
+    id = (connection_id_t *)buf;
+
+    /* 2. Check if size matches */
+    add_result = CONNECTION_TABLE_add_connection(g_connection_table, id);
+    if (E__SUCCESS != add_result) {
+        result = 0;
+        goto l_cleanup;
+    }
+
+    /* Success */
+    result = sizeof(*id);
+
 l_cleanup:
 
     return result;

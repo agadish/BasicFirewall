@@ -30,8 +30,16 @@ entry_init_by_skb(connection_entry_t *entry,
                   const struct sk_buff *skb);
 
 static void
+entry_init_by_id(connection_entry_t *entry,
+                 const connection_id_t *id);
+
+static void
 proxy_entry_init_by_skb(proxy_connection_entry_t *entry,
                         const struct sk_buff *skb);
+
+static void
+proxy_entry_init_by_id(proxy_connection_entry_t *entry,
+                       const connection_id_t *id);
 
 static void
 connection_id_flip(connection_id_t *dest,
@@ -39,7 +47,7 @@ connection_id_flip(connection_id_t *dest,
 
 static void
 proxy_init_proxy_ports(proxy_connection_entry_t *entry,
-                       uint16_t port_n);
+                       uint16_t dst_port_n);
 
 static void
 proxy_entry_pre_routing_hook(proxy_connection_entry_t *entry,
@@ -130,6 +138,10 @@ static void
 conn_init_by_skb(connection_t *conn,
                  const struct sk_buff *skb);
 
+static void
+conn_init_by_id(connection_t *conn,
+                const connection_id_t *id);
+
 static bool_t
 entry_is_closed(connection_entry_t *entry);
 
@@ -153,6 +165,7 @@ connection_entry_vtbl_t g_vtable_connection_direct = {
     .destroy = entry_destroy,
     .is_closed = entry_is_closed,
     .init_by_skb = entry_init_by_skb,
+    .init_by_id = entry_init_by_id,
     .pre_routing_hook = NULL,
     .local_out_hook = NULL,
     .dump = dump_entry,
@@ -166,8 +179,8 @@ connection_entry_vtbl_t g_vtable_connection_proxy = {
     .create = (entry_create_f)proxy_entry_create,
     .destroy = (entry_destroy_f)proxy_entry_destroy,
     .is_closed = (entry_is_closed_f)proxy_entry_is_closed,
-    .init_by_skb = entry_init_by_skb,
     .init_by_skb = (entry_init_by_skb_f)proxy_entry_init_by_skb,
+    .init_by_id = (entry_init_by_id_f)proxy_entry_init_by_id,
     .pre_routing_hook = (entry_hook_f)proxy_entry_pre_routing_hook,
     .local_out_hook = (entry_hook_f)proxy_entry_local_out_hook,
     .dump = (dump_entry_f)dump_proxy_entry,
@@ -305,6 +318,27 @@ l_cleanup:
     return;
 }
 
+static void
+conn_init_by_id(connection_t *conn,
+                const connection_id_t *id)
+{
+    /* 0. Input validation */
+    if ((NULL == conn) || (NULL == id)) {
+        goto l_cleanup;
+    }
+
+    /* 1. ID initialization */
+    (void)memcpy(&conn->opener.id, id, sizeof(*id));
+    connection_id_flip(&conn->listener.id, id);
+
+    /* 2. State initialiation */
+    conn->opener.state = TCP_CLOSE;
+    conn->listener.state = TCP_CLOSE;
+
+l_cleanup:
+    return;
+}
+
 /* static void */
 /* conn_init_by_inverse_conn(connection_t *conn, */
 /*                           const connection_t *inverse_conn) */
@@ -319,7 +353,18 @@ static void
 entry_init_by_skb(connection_entry_t *entry,
                   const struct sk_buff *skb)
 {
-    conn_init_by_skb(entry->conn, skb);
+    if ((NULL != entry) && (NULL != skb)) {
+        conn_init_by_skb(entry->conn, skb);
+    }
+}
+
+static void
+entry_init_by_id(connection_entry_t *entry,
+                 const connection_id_t *id)
+{
+    if ((NULL != entry) && (NULL != id)) {
+        conn_init_by_id(entry->conn, id);
+    }
 }
 
 static void
@@ -336,13 +381,30 @@ proxy_entry_init_by_skb(proxy_connection_entry_t *entry,
     tcp_header = tcp_hdr(skb);
     /* 1. Init connections */
     conn_init_by_skb((connection_t *)entry->client_conn, skb);
-    /* printk(KERN_INFO "%s: client_conn= %s\n", __func__, CONN_str((connection_t *)entry->client_conn)); */
     conn_init_by_skb((connection_t *)entry->server_conn, skb);
-    /* conn_init_by_inverse_conn((connection_t *)entry->server_conn, */
-    /*                           (connection_t *)entry->client_conn); */
 
     /* 2. Proxy ports */
     proxy_init_proxy_ports(entry, tcp_header->dest);
+
+l_cleanup:
+    return;
+}
+
+static void
+proxy_entry_init_by_id(proxy_connection_entry_t *entry,
+                       const connection_id_t *id)
+{
+    /* 0. Input validation */
+    if ((NULL == entry) || (NULL == id)) {
+        goto l_cleanup;
+    }
+
+    /* 1. Init connections */
+    conn_init_by_id((connection_t *)entry->client_conn, id);
+    conn_init_by_id((connection_t *)entry->server_conn, id);
+
+    /* 2. Proxy ports */
+    proxy_init_proxy_ports(entry, id->dst_port);
 
 l_cleanup:
     return;
@@ -402,9 +464,9 @@ l_cleanup:
 
 static void
 proxy_init_proxy_ports(proxy_connection_entry_t *entry,
-                       uint16_t port_n)
+                       uint16_t dst_port_n)
 {
-    switch (port_n) 
+    switch (dst_port_n) 
     {
         case HTTP_PORT_N:
             printk(KERN_INFO "%s: hello port 80\n", __func__);
@@ -417,7 +479,7 @@ proxy_init_proxy_ports(proxy_connection_entry_t *entry,
             entry->server_conn->proxy_port = 0; /* Will be set later */
             break;
         default:
-            printk(KERN_ERR "%s: got port that is not HTTP/FTP: %d\n", __func__, ntohs(port_n));
+            printk(KERN_ERR "%s: got port that is not HTTP/FTP: %d\n", __func__, ntohs(dst_port_n));
             break;
     }
 }
@@ -766,6 +828,57 @@ CONNECTION_ENTRY_create_from_syn(connection_entry_t **entry_out,
 
     /* 3. Init entry's connection */
     CONNECTION_ENTRY_init_by_skb(entry, skb);
+
+    /* Success */
+    *entry_out = entry;
+
+    result = E__SUCCESS;
+l_cleanup:
+
+    if (E__SUCCESS != result) {
+        if ((NULL != vtable) && (NULL != entry)) {
+            CONNECTION_ENTRY_destroy(entry);
+        }
+    }
+
+    return result;
+}
+
+result_t
+CONNECTION_ENTRY_create_from_id(connection_entry_t **entry_out,
+                                const connection_id_t *id)
+{
+    result_t result = E__UNKNOWN;
+    connection_entry_t *entry = NULL;
+    connection_entry_vtbl_t *vtable = NULL;
+
+    /* 0. Input validation */
+    if ((NULL == entry_out) || (NULL == id)) {
+        result = E__NULL_INPUT;
+        goto l_cleanup;
+    }
+
+    /* 1. Determine if proxy */
+    /* 1.1. Check by destination port */
+    switch (id->dst_port)
+    {
+        case HTTP_PORT_N:
+        case FTP_PORT_N:
+            vtable = &g_vtable_connection_proxy;
+            break;
+        default:
+            vtable = &g_vtable_connection_direct;
+            break;
+    }
+
+    /* 2. Allocate entry */
+    result = vtable->create(&entry);
+    if (E__SUCCESS != result) {
+        goto l_cleanup;
+    }
+
+    /* 3. Init entry's connection */
+    CONNECTION_ENTRY_init_by_id(entry, id);
 
     /* Success */
     *entry_out = entry;

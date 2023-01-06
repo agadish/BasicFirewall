@@ -658,3 +658,41 @@ l_cleanup:
 
     return result;
 }
+
+result_t
+CONNECTION_TABLE_add_connection(connection_table_t *table,
+                                const connection_id_t *id)
+{
+    result_t result = E__UNKNOWN;
+    connection_entry_t *entry = NULL;
+    
+    /* 0. Input validation */
+    if ((NULL == table) || (NULL == id)) {
+        result = E__NULL_INPUT;
+        goto l_cleanup;
+    }
+
+    /* 1. Create connection entry */
+    result = CONNECTION_ENTRY_create_from_id(&entry, id);
+    if (E__SUCCESS != result) {
+        goto l_cleanup;
+    }
+
+    /* 2. Add to entries list */
+    klist_add_tail(&entry->node, &table->list);
+    printk(KERN_INFO "%s : added entry to table->list\n", __func__);
+
+    /* TODO: If you add logic that can fail, make sure to clean the entry from
+     *       the tables upon failure */
+
+    /* Success */
+    result = E__SUCCESS;
+l_cleanup:
+    if (E__SUCCESS != result) {
+        CONNECTION_ENTRY_destroy(entry);
+        entry = NULL;
+    }
+
+    return result;
+}
+

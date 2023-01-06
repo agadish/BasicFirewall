@@ -25,6 +25,7 @@
 /*   M A C R O S   */
 #define _ENTRY_VTBL(entry) (((connection_entry_t *)(entry))->_vtbl)
 #define CONNECTION_ENTRY_init_by_skb(entry, skb) (_ENTRY_VTBL((entry))->init_by_skb((connection_entry_t *)(entry), (skb)))
+#define CONNECTION_ENTRY_init_by_id(entry, id) (_ENTRY_VTBL((entry))->init_by_id((connection_entry_t *)(entry), (id)))
 #define CONNECTION_ENTRY_destroy(entry) (_ENTRY_VTBL((entry))->destroy((connection_entry_t *)(entry)))
 #define CONNECTION_ENTRY_pre_routing_hook(entry, skb, cmp_result) do {          \
     if (NULL != _ENTRY_VTBL((entry))->pre_routing_hook) {                       \
@@ -75,6 +76,8 @@ typedef struct single_connection_s single_connection_t;
 typedef struct connection_entry_s connection_entry_t;
 typedef struct proxy_connection_entry_s proxy_connection_entry_t;
 typedef result_t (*entry_create_f)(connection_entry_t **entry_out);
+typedef void (*entry_init_by_id_f)(connection_entry_t *entry,
+                                   const connection_id_t *id);
 typedef void (*entry_init_by_skb_f)(connection_entry_t *entry,
                                     const struct sk_buff *skb);
 typedef void (*entry_destroy_f)(connection_entry_t *entry);
@@ -104,6 +107,7 @@ typedef struct connection_entry_vtbl_s {
     entry_destroy_f destroy;
     entry_is_closed_f is_closed;
     entry_init_by_skb_f init_by_skb;
+    entry_init_by_id_f init_by_id;
     entry_hook_f pre_routing_hook;
     entry_hook_f local_out_hook;
     entry_compare_f cmp_pre_routing;
@@ -171,6 +175,11 @@ extern connection_entry_vtbl_t g_vtable_connection_proxy;
 result_t
 CONNECTION_ENTRY_create_from_syn(connection_entry_t **entry_out,
                                   const struct sk_buff *skb);
+
+result_t
+CONNECTION_ENTRY_create_from_id(connection_entry_t **entry_out,
+                                const connection_id_t *id);
+
 const char *
 ENTRY_str(const connection_entry_t *ent);
 

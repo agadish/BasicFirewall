@@ -91,5 +91,10 @@ result_t
 CONNECTION_TABLE_drop_entry_by_skb(connection_table_t *table,
                                    struct sk_buff *skb);
 
+result_t
+CONNECTION_TABLE_add_connection(connection_table_t *table,
+                                const connection_id_t *id);
+
+
 
 #endif /* __CONNECTION_TABLE_H__ */

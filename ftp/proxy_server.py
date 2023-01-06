@@ -30,11 +30,12 @@ class Reactor(object):
                 self._read_handlers[r_fd]()
             except Exception as e:
                 print('Error: reactor handler failed - %s' % (e, ))
-                raise
+                raise # XXX: remove
 
 
 class ConnectionEntry(object):
     ENTRY_FORMAT = '!' + 'LHLHB' * 2
+    ENTRY_FORMAT_WRITE = '!LHLH'
     def __init__(self, raw_entry):
         if len(raw_entry) != struct.calcsize(self.ENTRY_FORMAT):
             raise ValueError('entry has inapropriate length %d (need %d)' % (len(raw_entry), struct.calcsize(self.ENTRY_FORMAT),  ))
@@ -78,6 +79,14 @@ class ConnectionEntry(object):
                        for i in range(0, len(data), entry_length)]
             return entries
 
+    @property
+    def src_addr(self):
+        return self._src_addr
+
+    @property
+    def dest_addr(self):
+        return self._dest_addr
+
 
 class ClientHandler(object):
     def __init__(self, connection_entry):
@@ -106,6 +115,15 @@ class ClientHandler(object):
     def handle_server_response(self):
         raise NotImplementedError()
 
+    def close(self):
+        print('ClientHandler: close')
+        self.unregister_from_reactor()
+        self.client_socket.close()
+        self.server_socket.close()
+
+    def __del_(self):
+        print('ClientHandler bye')
+
 
 class ProxyServer(object):
     def __init__(self, listen_port, bind_addr=ANY_ADDRESS, backlog=BACKLOG):
@@ -116,8 +134,6 @@ class ProxyServer(object):
         self._is_listening = False
         self._connections = list()
         self._reactor = Reactor()
-        # TODO: remove
-        self._clients_junk = list()
 
     def listen(self):
         s = socket.socket()
@@ -134,7 +150,6 @@ class ProxyServer(object):
     def accept_client(self):
         # 1. Accept client
         client_socket, client_addr = self._socket.accept()
-        self._clients_junk.append(client_socket)
 
         # 2. Read entry information from sysfs
         entry = self.read_connection_entry(client_addr)
@@ -177,7 +192,7 @@ class ProxyServer(object):
                 self._reactor.run_epoch()
             except Exception as e:
                 print('error %s' % (e, ))
-                print('clients: %s' % (self._clients_junk, ))
+                raise # XXX: remove
 
     def create_client_handler(self, entry):
         raise NotImplementedError()
