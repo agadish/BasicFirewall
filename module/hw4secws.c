@@ -366,7 +366,7 @@ hw4secws_hookfn_local_out(
     const struct nf_hook_state *state
 ){
     __u8 action = NF_ACCEPT;
-    entry_cmp_result_t conns_match = ENTRY_CMP_MISMATCH;
+    packet_direction_t conns_match = PACKET_DIRECTION_MISMATCH;
     reason_t reason = REASON_FW_INACTIVE;
 
     UNUSED_ARG(priv);
@@ -375,7 +375,7 @@ hw4secws_hookfn_local_out(
     /* 1. Check the connection */
     printk(KERN_INFO "%s: CONNECTION_TABLE_check for skb=%s\n", __func__, SKB_str(skb));
     conns_match = CONNECTION_TABLE_check(g_connection_table, skb, &action, &reason);
-    if (ENTRY_CMP_MISMATCH == conns_match) {
+    if (PACKET_DIRECTION_MISMATCH == conns_match) {
         printk(KERN_ERR "%s: outgoing packet without SYN nor connection table entry! syn%d ack%d fin%d rst%d\n", __func__, tcp_hdr(skb)->syn, tcp_hdr(skb)->ack, tcp_hdr(skb)->fin, tcp_hdr(skb)->rst);
         action = NF_DROP;
         goto l_cleanup;
@@ -399,7 +399,7 @@ hw4secws_hookfn_pre_routing(
     const struct nf_hook_state *state
 ){
     __u8 action = NF_DROP;
-    entry_cmp_result_t conns_match = ENTRY_CMP_MISMATCH;
+    packet_direction_t conns_match = PACKET_DIRECTION_MISMATCH;
     bool_t has_rule_match = FALSE;
     bool_t should_log = TRUE;
     reason_t reason = REASON_FW_INACTIVE;
@@ -421,7 +421,7 @@ hw4secws_hookfn_pre_routing(
         /* 3. Check the connection table */
         printk(KERN_INFO "%s: CONNECTION_TABLE_check for skb=%s\n", __func__, SKB_str(skb));
         conns_match = CONNECTION_TABLE_check(g_connection_table, skb, &action, &reason);
-        if (ENTRY_CMP_MISMATCH != conns_match) {
+        if (PACKET_DIRECTION_MISMATCH != conns_match) {
             printk(KERN_INFO "%s: has a conn match!\n", __func__);
             should_log = FALSE;
         } else {
@@ -447,7 +447,7 @@ hw4secws_hookfn_pre_routing(
                     /* 6. Check the connection table once again - after inserting new rule */
                     printk(KERN_INFO "%s: CONNECTION_TABLE_check for skb=%s first syn\n", __func__, SKB_str(skb));
                     conns_match = CONNECTION_TABLE_check(g_connection_table, skb, &action, &reason);
-                    if (ENTRY_CMP_MISMATCH != conns_match) {
+                    if (PACKET_DIRECTION_MISMATCH != conns_match) {
                         printk(KERN_INFO "%s: has a conn match second time!\n", __func__);
                         should_log = FALSE;
                     }

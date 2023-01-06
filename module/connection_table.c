@@ -44,10 +44,15 @@ tcp_machine_state(single_connection_t *sender,
                   const struct sk_buff *skb,
                   bool_t *is_removed_out);
 
-static entry_cmp_result_t
-search_entry(struct klist *entries_list,
-             const struct sk_buff *skb,
-             connection_entry_t **entry_out);
+static packet_direction_t
+search_entry__pre_routing(struct klist *entries_list,
+                          const struct sk_buff *skb,
+                          connection_entry_t **entry_out);
+
+static packet_direction_t
+search_entry__local_out(struct klist *entries_list,
+                        const struct sk_buff *skb,
+                        connection_entry_t **entry_out);
 
 static void
 remove_entry(connection_entry_t *entry);
@@ -311,8 +316,7 @@ CONNECTION_TABLE_track_local_out(connection_table_t *table,
 {
     bool_t was_handled = FALSE;
     connection_entry_t *entry = NULL;
-    bool_t is_proxy_connection = FALSE;
-    entry_cmp_result_t cmp_result = ENTRY_CMP_MISMATCH;
+    packet_direction_t cmp_result = PACKET_DIRECTION_MISMATCH;
 
     /* 0. Input validation */
     if ((NULL == table) || (NULL == skb)) {
@@ -323,17 +327,14 @@ CONNECTION_TABLE_track_local_out(connection_table_t *table,
     /* 1. Check if exists on the table */
     /* Note: For SYN packets it won't match, and the handling will be done here...
      *       Unless, a connection exists for this SYN packet, and it will be handled accordingly */
-    cmp_result = search_entry(&table->list, skb, &entry);
+    cmp_result = search_entry__local_out(&table->list, skb, &entry);
     printk(KERN_INFO "%s (skb=%s): search_entry returned %d\n", __func__, SKB_str(skb), cmp_result);
-    if (ENTRY_CMP_MISMATCH == cmp_result) {
+    if (PACKET_DIRECTION_MISMATCH == cmp_result) {
         /* printk(KERN_INFO "%s (skb=%s): no entry for 0x%.8x:0x%.4x -> 0x%.8x->0x%.4x\n", __func__, SKB_str(skb), ip_hdr(skb)->saddr, tcp_hdr(skb)->source, ip_hdr(skb)->daddr, tcp_hdr(skb)->dest); */
         goto l_cleanup;
     }
 
-    is_proxy_connection = IS_PROXY_ENTRY(entry);
-    if (is_proxy_connection) {
-        CONNECTION_ENTRY_hook(entry, skb);
-    }
+    CONNECTION_ENTRY_local_out_hook(entry, skb, cmp_result);
 
 l_cleanup:
 
@@ -341,13 +342,13 @@ l_cleanup:
 }
 
 
-entry_cmp_result_t
+packet_direction_t
 CONNECTION_TABLE_check(connection_table_t *table,
                        struct sk_buff *skb,
                        __u8 *action_out,
                        reason_t *reason_out)
 {
-    entry_cmp_result_t cmp_result = ENTRY_CMP_MISMATCH;
+    packet_direction_t cmp_result = PACKET_DIRECTION_MISMATCH;
     bool_t is_legal_traffic = TRUE;
     connection_entry_t *entry = NULL;
     single_connection_t *conn_sender = NULL;
@@ -377,9 +378,9 @@ CONNECTION_TABLE_check(connection_table_t *table,
     /* 1. Check if exists on the table */
     /* Note: For SYN packets it won't match, and the handling will be done here...
      *       Unless, a connection exists for this SYN packet, and it will be handled accordingly */
-    cmp_result = search_entry(&table->list, skb, &entry);
+    cmp_result = search_entry__pre_routing(&table->list, skb, &entry);
     printk(KERN_INFO "%s (skb=%s): search_entry returned %d\n", __func__, SKB_str(skb), cmp_result);
-    if (ENTRY_CMP_MISMATCH == cmp_result) {
+    if (PACKET_DIRECTION_MISMATCH == cmp_result) {
         /* printk(KERN_INFO "%s (skb=%s): no entry\n", __func__, SKB_str(skb)); */
         goto l_cleanup;
     }
@@ -421,7 +422,7 @@ CONNECTION_TABLE_check(connection_table_t *table,
     }
 
     /* 6. Call the hook */
-    CONNECTION_ENTRY_hook(entry, skb);
+    CONNECTION_ENTRY_pre_routing_hook(entry, skb, cmp_result);
     /* printk(KERN_INFO "%s (skb %s): called hook\n", __func__, SKB_str(skb)); */
 
 l_cleanup:
@@ -481,12 +482,12 @@ l_cleanup:
     return result;
 }
 
-static entry_cmp_result_t
-search_entry(struct klist *entries_list,
-             const struct sk_buff *skb,
-             connection_entry_t **entry_out)
+static packet_direction_t
+search_entry__local_out(struct klist *entries_list,
+                        const struct sk_buff *skb,
+                        connection_entry_t **entry_out)
 {
-    entry_cmp_result_t cmp_result = ENTRY_CMP_MISMATCH;
+    packet_direction_t cmp_result = PACKET_DIRECTION_MISMATCH;
     connection_entry_t *entry = NULL;
     struct klist_iter list_iter = {0};
 
@@ -503,8 +504,43 @@ search_entry(struct klist *entries_list,
         }
 
         /* 3. Check if matches */
-        cmp_result = CONNECTION_ENTRY_compare(entry, skb);
-        if (ENTRY_CMP_MISMATCH != cmp_result) {
+        cmp_result = CONNECTION_ENTRY_cmp_local_out(entry, skb);
+        if (PACKET_DIRECTION_MISMATCH != cmp_result) {
+            /* 4. On match - return the entry and stop the iteration */
+            *entry_out = entry;
+            break;
+        }
+    }
+
+    klist_iter_exit(&list_iter);
+
+    return cmp_result;
+}
+
+static packet_direction_t
+search_entry__pre_routing(struct klist *entries_list,
+             const struct sk_buff *skb,
+             connection_entry_t **entry_out)
+{
+    packet_direction_t cmp_result = PACKET_DIRECTION_MISMATCH;
+    connection_entry_t *entry = NULL;
+    struct klist_iter list_iter = {0};
+
+    klist_iter_init(entries_list, &list_iter);
+
+    /* printk(KERN_INFO "%s: searching id 0x%.8x:0x%.4x -> 0x%.8x:0x%.4x\n", __func__, id->src_ip, id->src_port, id->dst_ip, id->dst_port); */
+    while (TRUE) {
+        /* 1. Get the next entry from the list */
+        entry = (connection_entry_t *)klist_next(&list_iter); 
+        /* printk(KERN_INFO "%s: entry 0x%.8x\n", __func__, (uint32_t)entry); */
+        /* 2. Last entry? break */
+        if (NULL == entry) {
+            break;
+        }
+
+        /* 3. Check if matches */
+        cmp_result = CONNECTION_ENTRY_cmp_local_out(entry, skb);
+        if (PACKET_DIRECTION_MISMATCH != cmp_result) {
             /* 4. On match - return the entry and stop the iteration */
             *entry_out = entry;
             break;

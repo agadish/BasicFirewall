@@ -63,12 +63,12 @@ CONNECTION_TABLE_dump_data(const connection_table_t *table,
  * @param[out] reason_out The reason to the decision. Can be either one of
  *                        reason_t values, or the connection id casted to reason_t.
  *
- * @return ENTRY_CMP_MISMATCH if was not handled, other values if handled
+ * @return PACKET_DIRECTION_MISMATCH if was not handled, other values if handled
  *
  * @remark If the packet doesn't match the table then nothing will be written
  *         to action_out parameter
  */
-entry_cmp_result_t
+packet_direction_t
 CONNECTION_TABLE_check(connection_table_t *table,
                        struct sk_buff *skb,
                        __u8 *action_out,

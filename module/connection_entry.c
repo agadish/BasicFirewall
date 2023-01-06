@@ -37,24 +37,33 @@ proxy_init_proxy_ports(proxy_connection_entry_t *entry,
                        uint16_t port_n);
 
 static void
-entry_packet_hook(connection_entry_t *entry,
-                          struct sk_buff *skb);
+proxy_entry_pre_routing_hook(proxy_connection_entry_t *entry,
+                           struct sk_buff *skb,
+                           packet_direction_t skb_cmp_result);
 
 static void
-proxy_entry_packet_hook(proxy_connection_entry_t *entry,
-                          struct sk_buff *skb);
+proxy_entry_local_out_hook(proxy_connection_entry_t *entry,
+                           struct sk_buff *skb,
+                           packet_direction_t skb_cmp_result);
 
 static uint32_t
 get_local_ip__network_order(struct net_device *dev);
 
-static entry_cmp_result_t
-entry_compare_packet(connection_entry_t *entry,
-                     const struct sk_buff *skb);
+static packet_direction_t
+entry_compare_packet_pre_routing(connection_entry_t *entry,
+                                 const struct sk_buff *skb);
 
+static packet_direction_t
+entry_compare_packet_local_out(connection_entry_t *entry,
+                               const struct sk_buff *skb);
 
-static entry_cmp_result_t
-proxy_entry_compare_packet(proxy_connection_entry_t *entry,
-                           const struct sk_buff *skb);
+static packet_direction_t
+proxy_entry_compare_packet_pre_routing(proxy_connection_entry_t *entry,
+                                       const struct sk_buff *skb);
+
+static packet_direction_t
+proxy_entry_compare_packet_local_out(proxy_connection_entry_t *entry,
+                                     const struct sk_buff *skb);
 
 static bool_t
 does_connection_id_match_skb(connection_id_t *id,
@@ -74,14 +83,6 @@ entry_create(connection_entry_t **entry_out);
  */
 static result_t
 proxy_entry_create(proxy_connection_entry_t **pentry_out);
-
-static bool_t
-proxy_entry_is_from_client(proxy_connection_entry_t *pentry,
-                           const struct sk_buff *skb);
-
-static bool_t
-proxy_entry_is_from_server(proxy_connection_entry_t *pentry,
-                           const struct sk_buff *skb);
 
 static bool_t
 proxy_entry_is_to_client(proxy_connection_entry_t *pentry,
@@ -110,13 +111,13 @@ dump_proxy_entry(const proxy_connection_entry_t *pentry,
 
 static bool_t
 entry_get_conn_by_cmp(connection_entry_t *entry,
-                      entry_cmp_result_t cmp_res,
+                      packet_direction_t cmp_res,
                       single_connection_t **src_out,
                       single_connection_t **dst_out);
 
 static bool_t
 proxy_entry_get_conn_by_cmp(proxy_connection_entry_t *entry,
-                      entry_cmp_result_t cmp_res,
+                      packet_direction_t cmp_res,
                       single_connection_t **src_out,
                       single_connection_t **dst_out);
 
@@ -140,10 +141,12 @@ connection_entry_vtbl_t g_vtable_connection_direct = {
     .create = entry_create,
     .destroy = entry_destroy,
     .init_by_skb = entry_init_by_skb,
-    .hook = entry_packet_hook,
+    .pre_routing_hook = NULL,
+    .local_out_hook = NULL,
     .dump = dump_entry,
     .get_conn_by_cmp = entry_get_conn_by_cmp,
-    .compare = entry_compare_packet
+    .cmp_pre_routing = entry_compare_packet_pre_routing,
+    .cmp_local_out = entry_compare_packet_local_out
 };
 
 connection_entry_vtbl_t g_vtable_connection_proxy = {
@@ -151,10 +154,12 @@ connection_entry_vtbl_t g_vtable_connection_proxy = {
     .create = (entry_create_f)proxy_entry_create,
     .destroy = (entry_destroy_f)proxy_entry_destroy,
     .init_by_skb = (entry_init_by_skb_f)proxy_entry_init_by_skb,
-    .hook = (entry_hook_f)proxy_entry_packet_hook,
+    .pre_routing_hook = (entry_hook_f)proxy_entry_pre_routing_hook,
+    .local_out_hook = (entry_hook_f)proxy_entry_local_out_hook,
     .dump = (dump_entry_f)dump_proxy_entry,
     .get_conn_by_cmp = (get_conn_by_cmp_f)proxy_entry_get_conn_by_cmp,
-    .compare = (entry_compare_f)proxy_entry_compare_packet
+    .cmp_pre_routing = (entry_compare_f)proxy_entry_compare_packet_pre_routing,
+    .cmp_local_out = (entry_compare_f)proxy_entry_compare_packet_local_out
 };
 
 
@@ -434,11 +439,11 @@ l_cleanup:
     return result;
 }
 
-static entry_cmp_result_t
-entry_compare_packet(connection_entry_t *entry,
-                     const struct sk_buff *skb)
+static packet_direction_t
+entry_compare_packet_pre_routing(connection_entry_t *entry,
+                                 const struct sk_buff *skb)
 {
-    entry_cmp_result_t result = ENTRY_CMP_MISMATCH;
+    packet_direction_t result = PACKET_DIRECTION_MISMATCH;
     struct iphdr *ip_header = NULL;
     struct tcphdr *tcp_header = NULL;
 
@@ -451,10 +456,10 @@ entry_compare_packet(connection_entry_t *entry,
     tcp_header = tcp_hdr(skb);
     if (does_connection_id_match_skb(&entry->conn->opener.id, skb)) {
         /* Client to proxy */
-        result = ENTRY_CMP_FROM_CLIENT;
+        result = PACKET_DIRECTION_FROM_CLIENT;
     } else if (does_connection_id_match_skb(&entry->conn->listener.id, skb)) {
         /* Server to proxy */
-        result = ENTRY_CMP_FROM_SERVER;
+        result = PACKET_DIRECTION_FROM_SERVER;
     }
 
 l_cleanup:
@@ -462,11 +467,50 @@ l_cleanup:
     return result;
 }
 
-static entry_cmp_result_t
-proxy_entry_compare_packet(proxy_connection_entry_t *entry,
-                           const struct sk_buff *skb)
+static packet_direction_t
+proxy_entry_compare_packet_pre_routing(proxy_connection_entry_t *pentry,
+                                       const struct sk_buff *skb)
 {
-    entry_cmp_result_t result = ENTRY_CMP_MISMATCH;
+    packet_direction_t result = PACKET_DIRECTION_MISMATCH;
+    struct iphdr *ip_header = NULL;
+    struct tcphdr *tcp_header = NULL;
+
+    if ((NULL == pentry) || (NULL == skb)) {
+        printk(KERN_ERR "%s: got invalid input\n", __func__);
+        goto l_cleanup;
+    }
+
+    ip_header = ip_hdr(skb);
+    tcp_header = tcp_hdr(skb);
+    /* Note: relying on client_conn and server_conn having the same IDs */
+    if (does_connection_id_match_skb(&pentry->client_conn->opener.id, skb)) {
+        /* Client to proxy */
+        result = PACKET_DIRECTION_FROM_CLIENT;
+    } else if (does_connection_id_match_skb(&pentry->client_conn->listener.id, skb)) {
+        /* Server to proxy */
+        result = PACKET_DIRECTION_FROM_SERVER;
+    }
+
+l_cleanup:
+
+    return result;
+}
+
+static packet_direction_t
+entry_compare_packet_local_out(connection_entry_t *entry,
+                               const struct sk_buff *skb)
+{
+    /* Only proxy packets come in the local out */
+    printk(KERN_ERR "%s (skb=%s): non-proxy entry has a local-out packet, entry: %s\n",
+           __func__, SKB_str(skb), ENTRY_str(entry));
+    return PACKET_DIRECTION_MISMATCH;
+}
+
+static packet_direction_t
+proxy_entry_compare_packet_local_out(proxy_connection_entry_t *entry,
+                                     const struct sk_buff *skb)
+{
+    packet_direction_t result = PACKET_DIRECTION_MISMATCH;
     struct iphdr *ip_header = NULL;
     struct tcphdr *tcp_header = NULL;
 
@@ -478,22 +522,14 @@ proxy_entry_compare_packet(proxy_connection_entry_t *entry,
     ip_header = ip_hdr(skb);
     tcp_header = tcp_hdr(skb);
     printk(KERN_INFO "%s (skb %s): checking...\n", __func__, SKB_str(skb));
-    if (proxy_entry_is_from_client(entry, skb)) {
-        printk(KERN_INFO "%s: client to proxy\n", __func__);
-        /* Client to proxy */
-        result = ENTRY_CMP_FROM_CLIENT;
-    } else if (proxy_entry_is_from_server(entry, skb)) {
-        printk(KERN_INFO "%s: server to proxy\n", __func__);
-        /* Server to proxy */
-        result = ENTRY_CMP_FROM_SERVER;
-    } else if (proxy_entry_is_to_client(entry, skb)) {
+    if (proxy_entry_is_to_client(entry, skb)) {
         printk(KERN_INFO "%s: proxy to client\n", __func__);
         /* Proxy to client */
-        result = ENTRY_CMP_TO_CLIENT;
+        result = PACKET_DIRECTION_TO_CLIENT;
     } else if (proxy_entry_is_to_server(entry, skb)) {
         printk(KERN_INFO "%s: proxy to server\n", __func__);
         /* Proxy to server */
-        result = ENTRY_CMP_TO_SERVER;
+        result = PACKET_DIRECTION_TO_SERVER;
     } else {
         printk(KERN_INFO "%s: mismatch!\n", __func__);
     }
@@ -519,56 +555,6 @@ does_connection_id_match_skb(connection_id_t *id,
     {
         does_match = TRUE;
     }
-
-    return does_match;
-}
-
-static bool_t
-proxy_entry_is_from_client(proxy_connection_entry_t *pentry,
-                           const struct sk_buff *skb)
-{
-    bool_t does_match = FALSE;
-    struct iphdr *ip_header = ip_hdr(skb);
-    struct tcphdr *tcp_header = tcp_hdr(skb);
-    bool_t is_src_ok = FALSE;
-    bool_t is_dst_ok = FALSE;
-
-    /* Note: On LOCAL-OUT hook, we get the skb->dev to be NULL so the soruce IP
-     *       is not set correctly. We will treat it as zero */
-    if (NULL == pentry->client_conn || NULL == pentry->server_conn) {
-        printk(KERN_INFO "%s: CRAZY BUG\n", __func__);
-        return FALSE;
-    }
-    is_src_ok = ((ip_header->saddr == pentry->client_conn->opener.id.src_ip) &&
-                 (tcp_header->source == pentry->client_conn->opener.id.src_port));
-    is_dst_ok = ((ip_header->daddr == pentry->server_conn->listener.id.src_ip) &&
-                 (tcp_header->dest == pentry->server_conn->listener.id.src_port));
-
-    does_match = is_src_ok && is_dst_ok;
-    printk(KERN_INFO "%s (skb=%s): res %d %d -> %d, entry %s\n", __func__, SKB_str(skb), is_src_ok, is_dst_ok, does_match, ENTRY_str((connection_entry_t *)pentry));
-
-    return does_match;
-}
-    
-static bool_t
-proxy_entry_is_from_server(proxy_connection_entry_t *pentry,
-                           const struct sk_buff *skb)
-{
-    bool_t does_match = FALSE;
-    struct iphdr *ip_header = ip_hdr(skb);
-    struct tcphdr *tcp_header = tcp_hdr(skb);
-    bool_t is_src_ok = FALSE;
-    bool_t is_dst_ok = FALSE;
-
-    /* Note: On LOCAL-OUT hook, we get the skb->dev to be NULL so the soruce IP
-     *       is not set correctly. We will treat it as zero */
-    is_src_ok = ((ip_header->saddr == pentry->server_conn->listener.id.src_ip) &&
-                 (tcp_header->source == pentry->server_conn->listener.id.src_port));
-    is_dst_ok = ((ip_header->daddr == pentry->client_conn->opener.id.src_ip) &&
-                 (tcp_header->dest == pentry->client_conn->opener.id.src_port));
-
-    does_match = is_src_ok && is_dst_ok;
-    printk(KERN_INFO "%s (skb=%s): res %d %d -> %d, entry %s\n", __func__, SKB_str(skb), is_src_ok, is_dst_ok, does_match, ENTRY_str((connection_entry_t *)pentry));
 
     return does_match;
 }
@@ -642,29 +628,18 @@ proxy_entry_is_to_server(proxy_connection_entry_t *pentry,
 }
 
 static void
-entry_packet_hook(connection_entry_t *entry,
-                          struct sk_buff *skb)
-{
-    UNUSED_ARG(entry);
-    UNUSED_ARG(skb);
-
-    /* No processing is required */
-}
-
-static void
-proxy_entry_packet_hook(proxy_connection_entry_t *entry,
-                        struct sk_buff *skb)
+proxy_entry_pre_routing_hook(proxy_connection_entry_t *entry,
+                           struct sk_buff *skb,
+                           packet_direction_t cmp_result)
 {
     struct iphdr *ip_header = ip_hdr(skb);
     struct tcphdr *tcp_header = tcp_hdr(skb);
-    entry_cmp_result_t cmp_result = ENTRY_CMP_MISMATCH;
     bool_t was_modified = TRUE;
 
-    printk(KERN_INFO "%s (skb=%s): enter\n", __func__, SKB_str(skb));
-    cmp_result = CONNECTION_ENTRY_compare(entry, skb);
+    printk(KERN_INFO "%s (skb=%s): enter cmp_result %d\n", __func__, SKB_str(skb), cmp_result);
     switch (cmp_result) 
     {
-    case ENTRY_CMP_FROM_CLIENT:
+    case PACKET_DIRECTION_FROM_CLIENT:
         ip_header->daddr = get_local_ip__network_order(skb->dev);
         if (0 == ip_header->daddr) {
             printk(KERN_ERR "%s (skb=%s): dest addr from clientis 0\n", __func__, SKB_str(skb));
@@ -674,7 +649,7 @@ proxy_entry_packet_hook(proxy_connection_entry_t *entry,
         printk(KERN_INFO "%s: from client: dest to 0x%.8x:%d\n", __func__,
                 ntohl(ip_header->daddr), ntohs(tcp_header->dest));
         break;
-    case ENTRY_CMP_FROM_SERVER:
+    case PACKET_DIRECTION_FROM_SERVER:
         ip_header->daddr = get_local_ip__network_order(skb->dev);
         if (0 == ip_header->daddr) {
             printk(KERN_ERR "%s (skb=%s): dest addr from server is 0\n", __func__, SKB_str(skb));
@@ -684,7 +659,32 @@ proxy_entry_packet_hook(proxy_connection_entry_t *entry,
         printk(KERN_INFO "%s: from server: dest to 0x%.8x:%d\n", __func__,
                 ntohl(ip_header->daddr), ntohs(tcp_header->dest));
         break;
-    case ENTRY_CMP_TO_SERVER:
+    case PACKET_DIRECTION_MISMATCH:
+    default:
+        printk(KERN_INFO "%s (skb=%s): was not modified\n", __func__, SKB_str(skb));
+        was_modified = FALSE;
+        break;
+    }
+
+    /* Ignore failure of checksum */
+    if (was_modified) {
+        (void)fix_checksum(skb);
+    }
+}
+
+static void
+proxy_entry_local_out_hook(proxy_connection_entry_t *entry,
+                           struct sk_buff *skb,
+                           packet_direction_t cmp_result)
+{
+    struct iphdr *ip_header = ip_hdr(skb);
+    struct tcphdr *tcp_header = tcp_hdr(skb);
+    bool_t was_modified = TRUE;
+
+    printk(KERN_INFO "%s (skb=%s): enter cmp_result %d\n", __func__, SKB_str(skb), cmp_result);
+    switch (cmp_result) 
+    {
+    case PACKET_DIRECTION_TO_SERVER:
         printk(KERN_INFO "%s: to server: source 0x%.8x:%d changed to 0x%.8x:%d\n", __func__,
                 ntohl(ip_header->saddr), ntohs(tcp_header->source),
                 ntohl(entry->client_conn->listener.id.dst_ip),
@@ -697,7 +697,7 @@ proxy_entry_packet_hook(proxy_connection_entry_t *entry,
         }
         tcp_header->source = entry->client_conn->listener.id.dst_port;
         break;
-    case ENTRY_CMP_TO_CLIENT:
+    case PACKET_DIRECTION_TO_CLIENT:
         printk(KERN_INFO "%s: to client: source 0x%.8x:%d changed to 0x%.8x:%d\n", __func__,
                 ntohl(ip_header->saddr), ntohs(tcp_header->source),
                 ntohl(entry->client_conn->opener.id.dst_ip),
@@ -705,7 +705,7 @@ proxy_entry_packet_hook(proxy_connection_entry_t *entry,
         ip_header->saddr = entry->client_conn->opener.id.dst_ip;
         tcp_header->source = entry->client_conn->opener.id.dst_port;
         break;
-    case ENTRY_CMP_MISMATCH:
+    case PACKET_DIRECTION_MISMATCH:
     default:
         printk(KERN_INFO "%s (skb=%s): was not modified\n", __func__, SKB_str(skb));
         was_modified = FALSE;
@@ -924,7 +924,7 @@ l_cleanup:
 
 static bool_t
 entry_get_conn_by_cmp(connection_entry_t *entry,
-                      entry_cmp_result_t cmp_res,
+                      packet_direction_t cmp_res,
                       single_connection_t **src_out,
                       single_connection_t **dst_out)
 {
@@ -934,11 +934,11 @@ entry_get_conn_by_cmp(connection_entry_t *entry,
     if ((NULL != src_out) && (NULL != dst_out)) {
         switch (cmp_res)
         {
-        case ENTRY_CMP_FROM_CLIENT:
+        case PACKET_DIRECTION_FROM_CLIENT:
             *src_out = &entry->conn->opener;
             *dst_out = &entry->conn->listener;
             break;
-        case ENTRY_CMP_FROM_SERVER:
+        case PACKET_DIRECTION_FROM_SERVER:
             *src_out = &entry->conn->listener;
             *dst_out = &entry->conn->opener;
             break;
@@ -953,7 +953,7 @@ entry_get_conn_by_cmp(connection_entry_t *entry,
 
 static bool_t
 proxy_entry_get_conn_by_cmp(proxy_connection_entry_t *entry,
-                      entry_cmp_result_t cmp_res,
+                      packet_direction_t cmp_res,
                       single_connection_t **src_out,
                       single_connection_t **dst_out)
 {
@@ -963,22 +963,22 @@ proxy_entry_get_conn_by_cmp(proxy_connection_entry_t *entry,
     if ((NULL != src_out) && (NULL != dst_out)) {
         switch (cmp_res)
         {
-        case ENTRY_CMP_FROM_CLIENT:
+        case PACKET_DIRECTION_FROM_CLIENT:
             /* printk(KERN_INFO "%s: from client\n", __func__); */
             *src_out = &entry->client_conn->opener;
             *dst_out = &entry->client_conn->listener;
             break;
-        case ENTRY_CMP_FROM_SERVER:
+        case PACKET_DIRECTION_FROM_SERVER:
             /* printk(KERN_INFO "%s: from server\n", __func__); */
             *src_out = &entry->server_conn->listener;
             *dst_out = &entry->server_conn->opener;
             break;
-        case ENTRY_CMP_TO_CLIENT:
+        case PACKET_DIRECTION_TO_CLIENT:
             /* printk(KERN_INFO "%s: to client\n", __func__); */
             *src_out = &entry->client_conn->listener;
             *dst_out = &entry->client_conn->opener;
             break;
-        case ENTRY_CMP_TO_SERVER:
+        case PACKET_DIRECTION_TO_SERVER:
             /* printk(KERN_INFO "%s: to server\n", __func__); */
             *src_out = &entry->server_conn->opener;
             *dst_out = &entry->server_conn->listener;
