@@ -29,7 +29,6 @@ struct connection_table_s {
 
 
 /*   F U N C T I O N S   D E C L A R A T I O N S   */
-
 static bool_t
 tcp_machine_state(single_connection_t *sender,
                   single_connection_t *receiver,
@@ -48,8 +47,10 @@ search_entry__local_out(struct klist *entries_list,
 static void
 entry_notify_connection_closed(connection_entry_t *entry);
 
+/* XXX: Use entry_notify_connection_closed to remove an established
+ *      connection. It will be removed once it's fully closed */
 static void
-remove_entry(connection_entry_t *entry);
+_remove_entry(connection_entry_t *entry);
 
 
 /*   F U N C T I O N S   I M P L E M E N T A T I O N S   */
@@ -134,7 +135,6 @@ CONNECTION_TABLE_dump_data(const connection_table_t *table,
         entry = (connection_entry_t *)klist_next(&list_iter); 
         /* 2. Last chunk? break */
         if (NULL == entry) {
-            printk(KERN_INFO "%s: end of dump\n", __func__);
             result = TRUE;
             break;
         }
@@ -142,7 +142,6 @@ CONNECTION_TABLE_dump_data(const connection_table_t *table,
         current_length = CONNECTION_ENTRY_dump(entry,
                                                &buffer[current_index],
                                                remaining_length);
-        printk(KERN_INFO "%s: entry_dump size %d\n", __func__, current_length);
         if (0 == current_length) {
             break;
         }
@@ -169,120 +168,111 @@ tcp_machine_state(single_connection_t *sender,
 
     /* 1. Check RST */
     if (tcp_header->rst) {
-        printk(KERN_INFO "%s (skb=%s): sender sent reset, his connection is closed\n", __func__, SKB_str(skb));
         sender->state = TCP_CLOSE;
         is_closed = TRUE;
         goto l_cleanup;
     }
 
-    /* printk(KERN_INFO "%s (skb=%s): hello\n", __func__, SKB_str(skb)); */
     /* 2. Handle TCP state machine */
-    printk(KERN_INFO "%s (skb=%s): state %d\n", __func__, SKB_str(skb), sender->state);
     switch (sender->state)
     {
     case TCP_CLOSE:
         if (tcp_header->syn) {
             if (!tcp_header->ack) {
-            printk(KERN_INFO "%s (skb=%s): state CLOSE got syn!\n", __func__, SKB_str(skb));
-            sender->state = TCP_SYN_SENT;
-            receiver->state = TCP_SYN_RECV;
+                sender->state = TCP_SYN_SENT;
+                receiver->state = TCP_SYN_RECV;
             } else {
-                printk(KERN_INFO "%s (skb=%s): state CLOSE got syn-ack - illegal\n", __func__, SKB_str(skb));
                 goto l_cleanup;
             }
         } else {
-            printk(KERN_INFO "%s (skb=%s): state CLOSE got non-syn\n", __func__, SKB_str(skb));
             goto l_cleanup;
         }
         break;
+
     case TCP_ESTABLISHED:
-        /* SYN is illegal, FIN is legal (and closes), everything else is legal */
+        /* SYN is illegal, FIN is legal (and closes).
+         * Everything else is legal */
         if (tcp_header->fin) {
-            /* printk(KERN_INFO "%s (skb=%s): state %d got fin\n", __func__, SKB_str(skb), sender->state); */
             sender->state = TCP_FIN_WAIT1;
             receiver->state = TCP_CLOSE_WAIT;
         } else if (tcp_header->syn) {
             /* Detect invalid traffic */
-            printk(KERN_INFO "%s (skb=%s): state %d illegal traffic with syn\n", __func__, SKB_str(skb), sender->state);
             goto l_cleanup;
         } else {
             /* Default: action remains NF_ACCEPT */
         } 
         break;
+
     case TCP_SYN_SENT:
         /* Allowed only ACK */
         if (tcp_header->fin || (!tcp_header->ack)) {
-            printk(KERN_INFO "%s (skb=%s): state %d illegal traffic\n", __func__, SKB_str(skb), sender->state);
             goto l_cleanup;
         } else if (tcp_header->ack) {
-            /* printk(KERN_INFO "%s (skb=%s): state %d got ack\n", __func__, SKB_str(skb), sender->state); */
             sender->state = TCP_ESTABLISHED;
             receiver->state = TCP_ESTABLISHED;
         }
         break;
+
     case TCP_SYN_RECV:
         /* Nothing should be sent after SYN+ACK - drop the connection.
          * Note: it might be accepted later and its not our concern */
         if (tcp_header->syn && tcp_header->ack) {
-            /* printk(KERN_INFO "%s (skb=%s): state %d got synack\n", __func__, SKB_str(skb), sender->state); */
             sender->state = TCP_ESTABLISHED;
             receiver->state = TCP_ESTABLISHED;
         } else if (tcp_header->fin) {
-            /* printk(KERN_INFO "%s (skb=%s): state %d got fin\n", __func__, SKB_str(skb), sender->state); */
             sender->state = TCP_CLOSE_WAIT;
             receiver->state = TCP_FIN_WAIT1;
         } else {
-            printk(KERN_INFO "%s (skb=%s): state %d got illegal traffic\n", __func__, SKB_str(skb), sender->state);
             goto l_cleanup;
         }
         break;
+
     case TCP_FIN_WAIT1:
         if (tcp_header->fin) {
             if (tcp_header->ack) {
-                /* printk(KERN_INFO "%s (skb=%s): state %d got finack\n", __func__, SKB_str(skb), sender->state); */
                 sender->state = TCP_TIME_WAIT;
                 receiver->state = TCP_CLOSING;
             } else {
-                /* printk(KERN_INFO "%s (skb=%s): state %d got fin\n", __func__, SKB_str(skb), sender->state); */
                 sender->state = TCP_CLOSING;
                 receiver->state = TCP_TIME_WAIT;
             }
         } else if (tcp_header->ack) {
-            /* printk(KERN_INFO "%s (skb=%s): state %d got ack\n", __func__, SKB_str(skb), sender->state); */
             sender->state = TCP_FIN_WAIT2;
             receiver->state = TCP_CLOSE_WAIT;
         }
         break;
+
     case TCP_FIN_WAIT2:
         if (tcp_header->fin) {
-            /* printk(KERN_INFO "%s (skb=%s): state %d got fin\n", __func__, SKB_str(skb), sender->state); */
             sender->state = TCP_TIME_WAIT;
             receiver->state = TCP_CLOSING;
         }
         break;
+
     case TCP_CLOSING:
         if (tcp_header->ack) {
-            /* printk(KERN_INFO "%s (skb=%s): state %d got ack\n", __func__, SKB_str(skb), sender->state); */
             sender->state = TCP_TIME_WAIT;
             receiver->state = TCP_FIN_WAIT2;
         }
         break;
+
     case TCP_LAST_ACK:
     case TCP_TIME_WAIT:
-        /* printk(KERN_INFO "%s (skb=%s): state %d discarding\n", __func__, SKB_str(skb), sender->state); */
         sender->state = TCP_CLOSE;
         receiver->state = TCP_CLOSE;
         is_closed = TRUE;
         break;
+
     case TCP_CLOSE_WAIT:
         if (tcp_header->ack) {
-            /* printk(KERN_INFO "%s (skb=%s): state %d got ack\n", __func__, SKB_str(skb), sender->state); */
             sender->state = TCP_LAST_ACK;
             receiver->state = TCP_TIME_WAIT;
         }
         break;
+
     default:
-        printk(KERN_INFO "%s (skb=%s): state %d UNKNOWN! discarding\n", __func__, SKB_str(skb), sender->state);
+        printk(KERN_ERR "%s (skb=%s): state %d UNKNOWN! discarding\n",
+                __func__, SKB_str(skb), sender->state);
         goto l_cleanup;
     }
 
@@ -305,7 +295,7 @@ CONNECTION_TABLE_check_pre_routing(connection_table_t *table,
 
     /* 0. Input validation */
     if ((NULL == table) || (NULL == skb) || (NULL == action_out)) {
-        printk(KERN_WARNING "CONNECTION_TABLE_check_pre_routing got invalid input\n");
+        printk(KERN_ERR "CONNECTION_TABLE_check_pre_routing got invalid input\n");
         goto l_cleanup;
     }
 
@@ -318,27 +308,27 @@ CONNECTION_TABLE_check_pre_routing(connection_table_t *table,
         if (htons(ETH_P_IP) != skb->protocol) {
             printk(KERN_ERR "%s: skb is not ip!\n", __func__);
         }
-        /* printk(KERN_INFO "%s: ignoring non-tcp packet %p\n", __func__, skb); */
         goto l_cleanup;
     }
 
     /* 1. Check if exists on the table */
-    /* Note: For SYN packets it won't match, and the handling will be done here...
-     *       Unless, a connection exists for this SYN packet, and it will be handled accordingly */
+    /* Note: For SYN packets it won't match, and the handling will be done
+     *       here... Unless, a connection exists for this SYN packet, and it
+     *       will be handled accordingly */
     cmp_result = search_entry__pre_routing(&table->list, skb, &entry);
-    printk(KERN_INFO "%s (skb=%s): search_entry returned %d\n", __func__, SKB_str(skb), cmp_result);
     if (PACKET_DIRECTION_MISMATCH == cmp_result) {
-        /* printk(KERN_INFO "%s (skb=%s): no entry\n", __func__, SKB_str(skb)); */
         goto l_cleanup;
     }
 
     /* 3. Get sender and receiver */
-    /* printk(KERN_INFO "%s: calling CONNECTION_ENTRY_get_conns_by_direction=%p...\n", __func__, entry->_vtbl->get_conns_by_direction); */
-    result_get_conn = CONNECTION_ENTRY_get_conns_by_direction(entry, cmp_result, &conn_sender, &conn_receiver);
-    /* printk(KERN_INFO "%s: get_conns_by_direction returned\n", __func__); */
+    result_get_conn = CONNECTION_ENTRY_get_conns_by_direction(entry,
+                                                              cmp_result,
+                                                              &conn_sender,
+                                                              &conn_receiver);
     if (!result_get_conn) {
-        printk(KERN_INFO "%s (skb=%s): invalid get conn\n", __func__, SKB_str(skb));
-        remove_entry(entry);
+        printk(KERN_ERR "%s (skb=%s): invalid get conn\n",
+                __func__, SKB_str(skb));
+        _remove_entry(entry);
         *action_out = NF_DROP;
         goto l_cleanup;
     }
@@ -347,14 +337,13 @@ CONNECTION_TABLE_check_pre_routing(connection_table_t *table,
     /* 4.1. Update the machine state */
     is_closed = tcp_machine_state(conn_sender, conn_receiver, skb);
     if (is_closed) {
-        /* 4.2. Close the connection (if all the connections are close and finish) */
+        /* 4.2. Softly close the connection */
         entry_notify_connection_closed(entry);
         goto l_cleanup;
     }
 
     /* 5. Call the hook */
     CONNECTION_ENTRY_pre_routing_hook(entry, skb, cmp_result);
-    /* printk(KERN_INFO "%s (skb %s): called hook\n", __func__, SKB_str(skb)); */
 
 l_cleanup:
 
@@ -374,7 +363,7 @@ CONNECTION_TABLE_check_local_out(connection_table_t *table,
 
     /* 0. Input validation */
     if ((NULL == table) || (NULL == skb)) {
-        printk(KERN_WARNING "CONNECTION_TABLE_check_pre_routing got invalid input\n");
+        printk(KERN_ERR "CONNECTION_TABLE_check_pre_routing got invalid input\n");
         goto l_cleanup;
     }
 
@@ -387,36 +376,32 @@ CONNECTION_TABLE_check_local_out(connection_table_t *table,
         if (htons(ETH_P_IP) != skb->protocol) {
             printk(KERN_ERR "%s: skb is not ip!\n", __func__);
         }
-        /* printk(KERN_INFO "%s: ignoring non-tcp packet %p\n", __func__, skb); */
         goto l_cleanup;
     }
 
     /* 1. Check if exists on the table */
-    /* Note: For SYN packets it won't match, and the handling will be done here...
-     *       Unless, a connection exists for this SYN packet, and it will be handled accordingly */
+    /* Note: For SYN packets it won't match, and the handling will be done
+     *       here... Unless, a connection exists for this SYN packet, and it
+     *       will be handled accordingly */
     cmp_result = search_entry__local_out(&table->list, skb, &entry);
-    printk(KERN_INFO "%s (skb=%s): search_entry returned %d\n", __func__, SKB_str(skb), cmp_result);
     if (PACKET_DIRECTION_MISMATCH == cmp_result) {
-        /* printk(KERN_INFO "%s (skb=%s): no entry\n", __func__, SKB_str(skb)); */
         goto l_cleanup;
     }
 
     /* 3. Get sender and receiver */
-    /* printk(KERN_INFO "%s: calling CONNECTION_ENTRY_get_conns_by_direction=%p...\n", __func__, entry->_vtbl->get_conns_by_direction); */
-    result_get_conn = CONNECTION_ENTRY_get_conns_by_direction(entry, cmp_result, &conn_sender, &conn_receiver);
-    /* printk(KERN_INFO "%s: get_conns_by_direction returned\n", __func__); */
+    result_get_conn = CONNECTION_ENTRY_get_conns_by_direction(entry,
+                                                              cmp_result,
+                                                              &conn_sender,
+                                                              &conn_receiver);
     if (!result_get_conn) {
-        printk(KERN_INFO "%s (skb=%s): invalid get conn\n", __func__, SKB_str(skb));
-        remove_entry(entry);
+        printk(KERN_ERR "%s (skb=%s): invalid get conn\n",
+                __func__, SKB_str(skb));
+        _remove_entry(entry);
         goto l_cleanup;
     }
 
     /* 4. Handle TCP state machine */
-    /* printk(KERN_INFO "%s: beeforetcp sender=%s\n", __func__, SINGLE_CONN_str(conn_sender)); */
-    /* printk(KERN_INFO "%s: beforetcp receiver=%s\n", __func__, SINGLE_CONN_str(conn_receiver)); */
     is_closed = tcp_machine_state(conn_sender, conn_receiver, skb);
-    /* printk(KERN_INFO "%s: afftertcp sender=%s\n", __func__, SINGLE_CONN_str(conn_sender)); */
-    /* printk(KERN_INFO "%s: aftertcp receiver=%s\n", __func__, SINGLE_CONN_str(conn_receiver)); */
     /* 3. Check if the traffic is legal, drop illegal traffic */
     if (is_closed) {
         entry_notify_connection_closed(entry);
@@ -425,7 +410,6 @@ CONNECTION_TABLE_check_local_out(connection_table_t *table,
 
     /* 6. Call the hook */
     CONNECTION_ENTRY_local_out_hook(entry, skb, cmp_result);
-    /* printk(KERN_INFO "%s (skb %s): called hook\n", __func__, SKB_str(skb)); */
 
 l_cleanup:
 
@@ -454,7 +438,6 @@ CONNECTION_TABLE_add_by_skb(connection_table_t *table,
 
     /* 2. Add to entries list */
     klist_add_tail(&entry->node, &table->list);
-    printk(KERN_INFO "%s (skb=%s): added entry to table->list\n", __func__, SKB_str(skb));
 
     /* TODO: If you add logic that can fail, make sure to clean the entry from
      *       the tables upon failure */
@@ -481,11 +464,9 @@ search_entry__local_out(struct klist *entries_list,
 
     klist_iter_init(entries_list, &list_iter);
 
-    /* printk(KERN_INFO "%s: searching id 0x%.8x:0x%.4x -> 0x%.8x:0x%.4x\n", __func__, id->src_ip, id->src_port, id->dst_ip, id->dst_port); */
     while (TRUE) {
         /* 1. Get the next entry from the list */
         entry = (connection_entry_t *)klist_next(&list_iter); 
-        /* printk(KERN_INFO "%s: entry 0x%.8x\n", __func__, (uint32_t)entry); */
         /* 2. Last entry? break */
         if (NULL == entry) {
             break;
@@ -516,11 +497,9 @@ search_entry__pre_routing(struct klist *entries_list,
 
     klist_iter_init(entries_list, &list_iter);
 
-    /* printk(KERN_INFO "%s: searching id 0x%.8x:0x%.4x -> 0x%.8x:0x%.4x\n", __func__, id->src_ip, id->src_port, id->dst_ip, id->dst_port); */
     while (TRUE) {
         /* 1. Get the next entry from the list */
         entry = (connection_entry_t *)klist_next(&list_iter); 
-        /* printk(KERN_INFO "%s: entry 0x%.8x\n", __func__, (uint32_t)entry); */
         /* 2. Last entry? break */
         if (NULL == entry) {
             break;
@@ -543,21 +522,16 @@ search_entry__pre_routing(struct klist *entries_list,
 static void
 entry_notify_connection_closed(connection_entry_t *entry)
 {
-    /* 2. Garbage collector: if all subconnections are closed - entry can be removed */
+    /* Garbage collector:
+     * if all sub-connections are closed - entry can be removed */
     if (CONNECTION_ENTRY_is_closed(entry)) {
-        printk(KERN_INFO "%s: entry is closed! removing %s\n", __func__, ENTRY_str(entry));
-        remove_entry(entry);
-    } else {
-        printk(KERN_INFO "%s: entry is not closed yet... %s\n", __func__, ENTRY_str(entry));
+        _remove_entry(entry);
     }
 }
 
 static void
-remove_entry(connection_entry_t *entry)
+_remove_entry(connection_entry_t *entry)
 {
-    /* XXX: Use entry_notify_connection_closed to remove an established connection.
-     *      It will be removed once it's fully closed */
-    /* printk(KERN_INFO "%s: booya\n", __func__); */
     if (NULL != entry) {
         klist_del(&entry->node);
         CONNECTION_ENTRY_destroy(entry);
@@ -586,7 +560,7 @@ CONNECTION_TABLE_remove_by_skb(connection_table_t *table,
                                           &entry);
     /* If entry not found - return success */
     if (PACKET_DIRECTION_MISMATCH != direction) {
-        remove_entry(entry);
+        _remove_entry(entry);
     }
 
     result = E__SUCCESS;
@@ -616,7 +590,6 @@ CONNECTION_TABLE_add_by_id(connection_table_t *table,
 
     /* 2. Add to entries list */
     klist_add_tail(&entry->node, &table->list);
-    printk(KERN_INFO "%s : added entry to table->list\n", __func__);
 
     /* TODO: If you add logic that can fail, make sure to clean the entry from
      *       the tables upon failure */

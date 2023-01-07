@@ -31,10 +31,12 @@
  *        XORing the ack bit with the ack_t value does the job
  */
 #define NET_UTILS_DOES_ACK_MATCH(tcp_header, rule) (((tcp_header)->ack) ^ \
-                                                        (rule)->ack)
+                                                    (rule)->ack)
 
 #define NET_UTILS_GET_IP_MASK(n) ((0 == (n)) ? 0 : (~((1 << (32 - (n))) - 1)))
-#define NET_UTILS_is_tcp_packet(skb) ((NULL != (skb)) && (IPPROTO_TCP == ip_hdr((skb))->protocol))
+#define NET_UTILS_is_tcp_packet(skb) (                              \
+    (NULL != (skb)) && (IPPROTO_TCP == ip_hdr((skb))->protocol)     \
+)
 
 
 /*   F U N C T I O N S   D E C L A R A T I O N S   */
@@ -98,7 +100,6 @@ NET_UTILS_is_tcp_udp_icmp_packet(const struct sk_buff *skb);
  */
 bool_t
 NET_UTILS_is_xmas_packet(const struct sk_buff *skb);
-
 
 
 #endif /* __NET_UTILS_H__ */

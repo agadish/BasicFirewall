@@ -267,7 +267,7 @@ log_modify(struct device *dev,
 
 /**
  * @brief Read logs from the firewall's logs module to the userspace.
- *        The logs are read as an array of log_row_t, with maximum size possible
+ *        The logs are read as an array of log_row_t, with max size possible
  *
  * @param[in] fw_log_file Ignored
  * @param[out] user_buffer The user buffer which the logs will be copied to
@@ -451,11 +451,8 @@ fw_hook__existing_connection(struct sk_buff *skb, __u8 *nf_action__out)
     __u8 action = NF_DROP;
     packet_direction_t conns_match = PACKET_DIRECTION_MISMATCH;
 
-    printk(KERN_INFO "%s (skb=%s): enter\n", __func__, SKB_str(skb));
     /* 1. Handle only TCP packets */
     if (!NET_UTILS_is_tcp_packet(skb)) {
-        printk(KERN_INFO "%s: ignoring non-TCP packet (%d)\n", __func__,
-               ip_hdr(skb)->protocol);
         is_handled = FALSE;
         goto l_cleanup;
     }
@@ -463,11 +460,12 @@ fw_hook__existing_connection(struct sk_buff *skb, __u8 *nf_action__out)
     /* 2. Do the handling and get the packet direction.
      *    Any non-PACKET_DIRECTION_MISMATCH return value means that the
      *    connection exists in the table and the packet was handled */
-    conns_match = CONNECTION_TABLE_check_pre_routing(g_connection_table, skb, &action);
+    conns_match = CONNECTION_TABLE_check_pre_routing(g_connection_table,
+                                                     skb,
+                                                     &action);
     if (PACKET_DIRECTION_MISMATCH != conns_match) {
         is_handled = TRUE;
         action = NF_ACCEPT;
-        printk(KERN_INFO "%s: has a conn match!\n", __func__);
     }
 
     if (is_handled) {
@@ -487,7 +485,6 @@ fw_hook__route_table(struct sk_buff *skb, __u8 *nf_action__out)
     __u8 action = NF_DROP;
     reason_t reason = REASON_FW_INACTIVE;
 
-    printk(KERN_INFO "%s (skb=%s): enter\n", __func__, SKB_str(skb));
     /* 1. Check if the packet matches the rule table.
      *    XXX: If the rule table allows the packet to pass it will also fulfil
      *    the accept reason, and this hook WON'T HANDLE THE PACKET and pass it
@@ -499,7 +496,8 @@ fw_hook__route_table(struct sk_buff *skb, __u8 *nf_action__out)
                                              &action,
                                              &reason);
     if (!does_match_rule_table) {
-        /* 2. If it doesn't match the rule table - handle the packet by dropping it */
+        /* 2. If it doesn't match the rule table - handle the packet by
+         *    dropping it */
         is_handled = TRUE;
         action = NF_DROP;
         reason = REASON_NO_MATCHING_RULE;
@@ -521,7 +519,6 @@ fw_hook__connection_table_add(struct sk_buff *skb, __u8 *nf_action__out)
     bool_t is_handled = FALSE;
     __u8 action = NF_DROP;
     reason_t reason = REASON_FW_INACTIVE;
-    printk(KERN_INFO "%s (skb=%s): enter\n", __func__, SKB_str(skb));
 
     if (NET_UTILS_is_syn_packet(skb)) {
         (void)CONNECTION_TABLE_add_by_skb(g_connection_table, skb);
@@ -529,10 +526,6 @@ fw_hook__connection_table_add(struct sk_buff *skb, __u8 *nf_action__out)
         is_handled = TRUE;
         action = NF_DROP;
         (void)CONNECTION_TABLE_remove_by_skb(g_connection_table, skb);
-        printk(KERN_ERR "%s (skb=%s): first packet is not syn\n", __func__,
-               SKB_str(skb));
-    } else {
-        printk(KERN_INFO "%s: skipping non-tcp packet\n", __func__);
     }
 
     if (is_handled) {
@@ -548,7 +541,6 @@ static bool_t
 fw_hook__collector(struct sk_buff *skb, __u8 *nf_action__out)
 {
     bool_t is_handled = TRUE;
-    printk(KERN_INFO "%s (skb=%s): enter\n", __func__, SKB_str(skb));
 
     UNUSED_ARG(skb);
     *nf_action__out = NF_ACCEPT;
@@ -564,11 +556,8 @@ fw_hook__local_out_connection(struct sk_buff *skb, __u8 *nf_action__out)
     __u8 action = NF_DROP;
     packet_direction_t conns_match = PACKET_DIRECTION_MISMATCH;
 
-    printk(KERN_INFO "%s (skb=%s): enter\n", __func__, SKB_str(skb));
     /* 1. Handle only TCP packets */
     if (!NET_UTILS_is_tcp_packet(skb)) {
-        printk(KERN_INFO "%s: ignoring non-TCP packet (%d)\n", __func__,
-               ip_hdr(skb)->protocol);
         is_handled = FALSE;
         goto l_cleanup;
     }
@@ -581,7 +570,6 @@ fw_hook__local_out_connection(struct sk_buff *skb, __u8 *nf_action__out)
         /* Found a connection, handle by NF_ACCEPT */
         is_handled = TRUE;
         action = NF_ACCEPT;
-        printk(KERN_INFO "%s: has a conn match!\n", __func__);
     }
 
     if (is_handled) {
@@ -650,7 +638,8 @@ hw4secws_nf_hook_local_out(void *priv,
                                 g_local_out_hooks,
                                 ARRAY_LENGTH(g_local_out_hooks));
 
-    printk(KERN_INFO "%s (skb=%s): action %d\n", __func__, SKB_str(skb), action);
+    printk(KERN_INFO "%s (skb=%s): action %d\n",
+            __func__, SKB_str(skb), action);
 
     return (unsigned int)action;
 }
@@ -666,7 +655,8 @@ hw4secws_nf_hook_pre_routing(void *priv,
                                 g_pre_routing_hooks,
                                 ARRAY_LENGTH(g_pre_routing_hooks));
 
-    printk(KERN_INFO "%s (skb=%s): action %d\n", __func__, SKB_str(skb), action);
+    printk(KERN_INFO "%s (skb=%s): action %d\n",
+            __func__, SKB_str(skb), action);
 
     return (unsigned int)action;
 }
@@ -795,7 +785,8 @@ init_rules_driver(void)
                                          RULES_CHAR_DEVICE_NAME,
                                          &g_fw_rules_fops);
     if (0 > g_rules_dev_number) {
-        printk(KERN_ERR "register_chrdev failed for %s\n", RULES_CHAR_DEVICE_NAME);
+        printk(KERN_ERR "register_chrdev failed for %s\n",
+                RULES_CHAR_DEVICE_NAME);
         result = -1;
         goto l_cleanup;
     }
@@ -843,7 +834,8 @@ init_conns_driver(void)
                                          CONNS_CHAR_DEVICE_NAME,
                                          &g_fw_conns_fops);
     if (0 > g_conns_dev_number) {
-        printk(KERN_ERR "register_chrdev failed for %s\n", CONNS_CHAR_DEVICE_NAME);
+        printk(KERN_ERR "register_chrdev failed for %s\n",
+                CONNS_CHAR_DEVICE_NAME);
         result = -1;
         goto l_cleanup;
     }

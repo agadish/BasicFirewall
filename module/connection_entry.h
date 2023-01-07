@@ -26,15 +26,21 @@
 
 /*   M A C R O S   */
 #define _ENTRY_VTBL(entry) (((connection_entry_t *)(entry))->_vtbl)
-#define CONNECTION_ENTRY_init_by_skb(entry, skb) (_ENTRY_VTBL((entry))->init_by_skb((connection_entry_t *)(entry), (skb)))
-#define CONNECTION_ENTRY_init_by_id(entry, id) (_ENTRY_VTBL((entry))->init_by_id((connection_entry_t *)(entry), (id)))
-#define CONNECTION_ENTRY_destroy(entry) (_ENTRY_VTBL((entry))->destroy((connection_entry_t *)(entry)))
-#define CONNECTION_ENTRY_pre_routing_hook(entry, skb, direction) do {           \
-    if (NULL != _ENTRY_VTBL((entry))->pre_routing_hook) {                       \
-        _ENTRY_VTBL((entry))->pre_routing_hook((connection_entry_t *)(entry),   \
-                                               (skb),                           \
-                                               (direction));                    \
-    }                                                                           \
+#define CONNECTION_ENTRY_init_by_skb(entry, skb) \
+    (_ENTRY_VTBL((entry))->init_by_skb((connection_entry_t *)(entry), (skb)))
+
+#define CONNECTION_ENTRY_init_by_id(entry, id) \
+    (_ENTRY_VTBL((entry))->init_by_id((connection_entry_t *)(entry), (id)))
+
+#define CONNECTION_ENTRY_destroy(entry) \
+    (_ENTRY_VTBL((entry))->destroy((connection_entry_t *)(entry)))
+
+#define CONNECTION_ENTRY_pre_routing_hook(ent, skb, direction) do {         \
+    if (NULL != _ENTRY_VTBL((ent))->pre_routing_hook) {                     \
+        _ENTRY_VTBL((ent))->pre_routing_hook((connection_entry_t *)(ent),   \
+                                             (skb),                         \
+                                             (direction));                  \
+    }                                                                       \
 } while (0)
 
 #define CONNECTION_ENTRY_local_out_hook(entry, skb, direction) do {         \
@@ -45,15 +51,30 @@
     }                                                                       \
 } while (0)
 
-#define CONNECTION_ENTRY_cmp_pre_routing(entry, skb) (_ENTRY_VTBL((entry))->cmp_pre_routing((connection_entry_t *)(entry), (skb)))
-#define CONNECTION_ENTRY_cmp_local_out(entry, skb) (_ENTRY_VTBL((entry))->cmp_local_out((connection_entry_t *)(entry), (skb)))
-#define CONNECTION_ENTRY_dump(entry, buf, buflen) (_ENTRY_VTBL((entry))->dump((connection_entry_t *)(entry), (buf), (buflen)))
-#define CONNECTION_ENTRY_get_conns_by_direction(entry, direction, src_out, dst_out) (_ENTRY_VTBL((entry))->get_conns_by_direction((entry), (direction), (src_out), (dst_out)))
-#define CONNECTION_ENTRY_is_closed(entry) (_ENTRY_VTBL((entry))->is_closed((connection_entry_t *)(entry)))
+#define CONNECTION_ENTRY_cmp_pre_routing(entry, skb) \
+    (_ENTRY_VTBL((entry))->cmp_pre_routing((connection_entry_t *)(entry), \
+                                           (skb)))
 
-#define IS_PROXY_ENTRY(entry) (CONNECTION_TYPE_PROXY == _ENTRY_VTBL((entry))->type)
+#define CONNECTION_ENTRY_cmp_local_out(entry, skb) \
+    (_ENTRY_VTBL((entry))->cmp_local_out((connection_entry_t *)(entry), (skb)))
 
-#define CMP_IS_SERVER_TO_CLIENT(cmp) ((PACKET_DIRECTION_FROM_SERVER == (cmp)) || (PACKET_DIRECTION_TO_CLIENT == (cmp)))
+#define CONNECTION_ENTRY_dump(entry, buf, buflen) \
+    (_ENTRY_VTBL((entry))->dump((connection_entry_t *)(entry), (buf), (buflen)))
+
+#define CONNECTION_ENTRY_get_conns_by_direction(entry, dir, src_out, dst_out) \
+    (_ENTRY_VTBL((entry))->get_conns_by_direction((entry), \
+                                                  (dir), \
+                                                  (src_out), \
+                                                  (dst_out)))
+
+#define CONNECTION_ENTRY_is_closed(entry) \
+    (_ENTRY_VTBL((entry))->is_closed((connection_entry_t *)(entry)))
+
+#define IS_PROXY_ENTRY(entry) (CONNECTION_TYPE_PROXY == \
+                               _ENTRY_VTBL((entry))->type)
+
+#define CMP_IS_SERVER_TO_CLIENT(cmp) ((PACKET_DIRECTION_FROM_SERVER == (cmp)) \
+                                      || (PACKET_DIRECTION_TO_CLIENT == (cmp)))
 
 
 /*   E N U M S   */
@@ -91,7 +112,6 @@ typedef bool_t (*get_conns_by_direction_f)(connection_entry_t *entry,
 typedef size_t (*dump_entry_f)(const connection_entry_t *entry,
                                uint8_t *buffer,
                                size_t buffer_size);
-
 
 typedef bool_t (*entry_is_closed_f)(connection_entry_t *entry);
 

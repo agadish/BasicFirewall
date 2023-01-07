@@ -53,8 +53,8 @@ CONNECTION_TABLE_dump_data(const connection_table_t *table,
                            size_t *buffer_size_inout);
 
 /**
- * @brief Match a given packet against the whole connection table, and return the
- *        required action
+ * @brief Match a given packet against the whole connection table, and return
+ *        the required action
  * 
  * @param[in] table Table with the connections
  * @param[in] skb The packet to check

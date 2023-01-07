@@ -105,13 +105,15 @@ is_rule_valid(const rule_t *r)
     /* 4. Ports larger than 1023 */
     /* 4.1. Src */
     if (ntohs(r->src_port) > PORT_MORE_THAN_1023) {
-        printk(KERN_INFO "Invalid rule: src_port > 1023 must be %d\n", PORT_MORE_THAN_1023);
+        printk(KERN_INFO "Invalid rule: src_port > 1023 must be %d\n",
+                PORT_MORE_THAN_1023);
         goto l_cleanup;
     }
 
     /* 4.1. Dst */
     if (ntohs(r->dst_port) > PORT_MORE_THAN_1023) {
-        printk(KERN_INFO "Invalid rule: dst_port > 1023 must be %d\n", PORT_MORE_THAN_1023);
+        printk(KERN_INFO "Invalid rule: dst_port > 1023 must be %d\n",
+                PORT_MORE_THAN_1023);
         goto l_cleanup;
     }
 
@@ -264,7 +266,11 @@ RULE_TABLE_check(const rule_table_t *table,
     size_t i = 0;
 
     /* 0. Input validation */
-    if ((NULL == table) || (NULL == skb) || (NULL == action_out) || (NULL == reason_out)) {
+    if ((NULL == table) ||
+        (NULL == skb) ||
+        (NULL == action_out) ||
+        (NULL == reason_out))
+    {
         printk(KERN_WARNING "RULE_TABLE_check got invalid input\n");
         goto l_cleanup;
     }
@@ -329,7 +335,8 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
         struct tcphdr *tcp_header = (struct tcphdr *)skb_transport_header(skb);
         /* 4.1. Match src port */
         if ((0 != rule->src_port) &&
-            (!((PORT_MORE_THAN_1023_N == rule->src_port) && ntohs(tcp_header->source) > PORT_1023)) &&
+            (!((PORT_MORE_THAN_1023_N == rule->src_port) &&
+               ntohs(tcp_header->source) > PORT_1023)) &&
             (rule->src_port != tcp_header->source))
         {
 
@@ -338,7 +345,8 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
 
         /* 4.2. Match dst port */
         if ((0 != rule->dst_port) &&
-            (!((PORT_MORE_THAN_1023_N == rule->dst_port) && ntohs(tcp_header->dest) > PORT_1023)) &&
+            (!((PORT_MORE_THAN_1023_N == rule->dst_port) &&
+               ntohs(tcp_header->dest) > PORT_1023)) &&
             (rule->dst_port != tcp_header->dest))
         {
             goto l_cleanup;
@@ -354,7 +362,8 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
         /* 4.1. Match src port */
         if ((0 != rule->src_port) &&
             (rule->src_port != udp_header->source) &&
-            ((PORT_MORE_THAN_1023_N == rule->src_port) && ntohs(udp_header->source) <= PORT_1023))
+            ((PORT_MORE_THAN_1023_N == rule->src_port) &&
+             ntohs(udp_header->source) <= PORT_1023))
         {
 
             goto l_cleanup;
@@ -363,7 +372,8 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
         /* 4.2. Match dst port */
         if ((0 != rule->dst_port) &&
             (rule->dst_port != udp_header->dest) &&
-            ((PORT_MORE_THAN_1023_N == rule->dst_port) && ntohs(udp_header->dest) <= PORT_1023))
+            ((PORT_MORE_THAN_1023_N == rule->dst_port) &&
+             ntohs(udp_header->dest) <= PORT_1023))
         {
             goto l_cleanup;
         }

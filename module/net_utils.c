@@ -28,6 +28,9 @@
 
 
 /*   F U N C T I O N S    I M P L E M E N T A T I O N S   */
+/**
+ * @author https://www.github.com/reuvenpl/checksum
+ */
 bool_t
 NET_UTILS_fix_checksum(struct sk_buff *skb)
 {
@@ -46,7 +49,8 @@ NET_UTILS_fix_checksum(struct sk_buff *skb)
     ip_header->check = ip_fast_csum((u8 *)ip_header, ip_header->ihl);
 
     /*
-     * From Linux doc here: https://elixir.bootlin.com/linux/v4.15/source/include/linux/skbuff.h#L90
+     * From Linux doc here:
+     * https://elixir.bootlin.com/linux/v4.15/source/include/linux/skbuff.h#L90
      * CHECKSUM_NONE:
      *
      *   Device did not checksum this packet e.g. due to lack of capabilities.
@@ -68,7 +72,12 @@ NET_UTILS_fix_checksum(struct sk_buff *skb)
     /* Fix TCP header checksum */
     tcplen = (ntohs(ip_header->tot_len) - ((ip_header->ihl) << 2));
     tcp_header->check = 0;
-    tcp_header->check = tcp_v4_check(tcplen, ip_header->saddr, ip_header->daddr, csum_partial((char *)tcp_header, tcplen, 0));
+    tcp_header->check = tcp_v4_check(
+        tcplen,
+        ip_header->saddr,
+        ip_header->daddr,
+        csum_partial((char *)tcp_header, tcplen, 0)
+    );
 
 l_cleanup:
 
@@ -141,7 +150,6 @@ NET_UTILS_get_packet_direction(const struct sk_buff *skb)
     } else if (0 == strncmp(iface_name, OUT_INTERFACE, name_length)) {
         direction = DIRECTION_OUT;
     } else {
-        /* printk(KERN_INFO "direction UNKNOWN: got %s\n", iface_name); */
         direction = DIRECTION_UNKNOWN;
     }
 

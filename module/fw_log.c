@@ -128,7 +128,6 @@ allocate_new_chunk_if_required(void)
 {
     result_t result = E__UNKNOWN;
 
-    /* printk(KERN_INFO "%s: write_index=%d (last possible %d)\n", __func__, ((NULL == g_log_tail) ? -1 : g_log_tail->write_index), ROWS_PER_CHUNK); */
     if ((NULL == g_log_tail) ||
         (ROWS_PER_CHUNK <= g_log_tail->write_index))
     {
@@ -136,7 +135,6 @@ allocate_new_chunk_if_required(void)
         if (E__SUCCESS != result) {
             goto l_cleanup;
         }
-        /* printk(KERN_INFO "out of rows, allocated new tail: %p\n", g_log_tail); */
     }
 
     result = E__SUCCESS;
@@ -316,7 +314,6 @@ FW_LOG_log_match(const struct sk_buff *skb,
     if (NULL == dest_row) {
         /* 1. Get a poiner to the matching log_row_t */
         /* 1.1. Make sure we have a free slot at the logs chunk tail */
-        /* printk(KERN_INFO "log row not found, allocating...\n"); */
         result = allocate_new_chunk_if_required();
         if (E__SUCCESS != result) {
             goto l_cleanup;
@@ -368,11 +365,11 @@ dump_from_chunk(logs_chunk_t *chunk,
 
 
     /* 3. Copy */
-    /* printk(KERN_INFO "%s: copying min(bufsize=%d, availsrc=%d)=%d bytes, \n", __func__, */
-    /*             buffer_size, available_source_bytes, size_to_copy); */
-    (void)copy_to_user(out_buffer,
-                       &((uint8_t *)&(chunk->rows))[(size_t)*offset_to_start_inout],
-                       size_to_copy);
+    (void)copy_to_user(
+        out_buffer,
+        &((uint8_t *)&(chunk->rows))[(size_t)*offset_to_start_inout],
+        size_to_copy
+    );
 
     /* 4. Update offset parameter - was chunk done? */
     if (available_source_bytes < size_to_copy) {
@@ -397,7 +394,6 @@ seek_to_chunk(struct klist_iter *iter, loff_t *offset_inout)
         current_chunk = (logs_chunk_t *)klist_next(iter); 
         if (NULL == current_chunk) {
             /* 1.1. No more chunks? return NULL */
-            /* printk("%s: woops no more chunks\n", __func__); */
             goto l_cleanup;
         }
 
@@ -405,11 +401,9 @@ seek_to_chunk(struct klist_iter *iter, loff_t *offset_inout)
         current_chunk_size = get_chunk_size(current_chunk);
         /* 2.1. If offset is less than chunk, this is the destination chunk */
         if (current_chunk_size > (size_t)*offset_inout) {
-            /* printk(KERN_INFO "%s: yeah found a chunk %p\n", __func__, current_chunk); */
             result = current_chunk;
             break;
         } else {
-            /* printk(KERN_INFO "%s: iterating %p (remaining=%d, cur=%d)\n", __func__, current_chunk, (int)*offset_inout, (int)current_chunk_size); */
             *offset_inout -= (loff_t)current_chunk_size;
         }
     }
@@ -438,7 +432,6 @@ FW_LOG_dump(uint8_t __user *out_buffer,
         goto l_cleanup;
     }
 
-    /* printk(KERN_INFO "%s(..., %d, %d)\n", __func__, (int)buffer_size, (int)*offset_inout); */
     /* 1. Init */
     current_offset = *offset_inout;
     klist_iter_init(&g_log, &i);
@@ -448,9 +441,11 @@ FW_LOG_dump(uint8_t __user *out_buffer,
     current_entry = seek_to_chunk(&i, &current_offset);
     /* Remark: may be NULL! */
 
-    /* printk(KERN_INFO "%s: seek_to_chunk done, copying data starting from %p\n", __func__, current_entry); */
     /* 3. Copy available data */
-    for (; NULL != current_entry ; current_entry = (logs_chunk_t *)klist_next(&i)) {
+    for (;
+         NULL != current_entry ;
+         current_entry = (logs_chunk_t *)klist_next(&i))
+    {
         /* 3.1. Copy as much available complete entires */
         current_written = dump_from_chunk(current_entry,
                                           &out_buffer[total_written],
