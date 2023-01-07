@@ -555,6 +555,8 @@ fw_hook__rule_table(struct sk_buff *skb, __u8 *nf_action__out)
         *nf_action__out = action;
     }
     /* 3. Log match */
+    printk(KERN_INFO "%s (skb=%s): logging action %d reason %d\n",
+            __func__, SKB_str(skb), action, reason);
     (void)FW_LOG_log_match(skb, action, reason);
 
     return is_handled;
@@ -682,8 +684,8 @@ hw4secws_nf_hook_local_out(void *priv,
                                 g_local_out_hooks,
                                 ARRAY_LENGTH(g_local_out_hooks));
 
-    printk(KERN_INFO "%s (skb=%s): action %d\n",
-            __func__, SKB_str(skb), action);
+    /* printk(KERN_INFO "%s (skb=%s): action %d\n", */
+    /*         __func__, SKB_str(skb), action); */
 
     return (unsigned int)action;
 }
@@ -699,8 +701,8 @@ hw4secws_nf_hook_pre_routing(void *priv,
                                 g_pre_routing_hooks,
                                 ARRAY_LENGTH(g_pre_routing_hooks));
 
-    printk(KERN_INFO "%s (skb=%s): action %d\n",
-            __func__, SKB_str(skb), action);
+    /* printk(KERN_INFO "%s (skb=%s): action %d\n", */
+    /*         __func__, SKB_str(skb), action); */
 
     return (unsigned int)action;
 }

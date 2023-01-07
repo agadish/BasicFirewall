@@ -275,13 +275,6 @@ RULE_TABLE_check(const rule_table_t *table,
         goto l_cleanup;
     }
 
-    if (0 == strncmp(skb->dev->name, DEBUG_INTERFACE, sizeof(skb->dev->name))) {
-        printk(KERN_INFO "packet from debug interface, bye\n");
-        does_match = TRUE;
-        *action_out = NF_ACCEPT;
-        *reason_out = -16;
-    }
-
     /* 1. Go over the rules list */
     for (i = 0 ; i < table->rules_count ; ++i) {
         const rule_t * current_rule = &table->rules[i];
