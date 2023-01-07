@@ -326,8 +326,10 @@ fw_hook__existing_connection_pre_routing(struct sk_buff *skb,
 
 /**
  * @brief Check the packet upon the rule table.
- *        If it doesn't pass, it will be DROPped.
- *        If it does pass, it will be ignored and handled by the next hook
+ *        If it doesn't pass, or if it does pass and the table says to drop
+ *        it - then it will be DROPped.
+ *        If it passes and the table accepts it, it will be ignored and handled
+ *        by the next hook
  * @see fw_hook_f
  */
 static bool_t

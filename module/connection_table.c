@@ -214,6 +214,7 @@ tcp_machine_state(single_connection_t *sender,
     /* 1. Check RST */
     if (tcp_header->rst) {
         sender->state = TCP_CLOSE;
+        receiver->state = TCP_CLOSE;
         is_closed = TRUE;
         goto l_cleanup;
     }

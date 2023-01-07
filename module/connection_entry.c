@@ -411,8 +411,6 @@ entry_compare_packet_local_out(connection_entry_t *entry,
                                const struct sk_buff *skb)
 {
     /* Only proxy packets come in the local out */
-    printk(KERN_ERR "%s (skb=%s): non-proxy entry got local-out packet, entry: %s\n",
-           __func__, SKB_str(skb), ENTRY_str(entry));
     return PACKET_DIRECTION_MISMATCH;
 }
 
