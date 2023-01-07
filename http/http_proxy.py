@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
-import urllib.parse
+#  import urllib.parse
+import http
 import proxy_server
+from email.parser import BytesParser
 
 HTTP_PROXY_PORT = 800
 CONTENT_TYPE = 'Content-Type'
@@ -9,35 +11,47 @@ REJECTED_CONTENT_TYPES = ['text/csv', 'application/zip']
 
 
 class HTTPClientHandler(proxy_server.ClientHandler):
+    def __init__(self, *args, **kwargs):
+        super(HTTPClientHandler, self).__init__(*args, **kwargs)
+        self.response = b''
+
     def handle_client_request(self):
-        print('handle_client_request!')
-        data = self.client_socket.read()
+        # XXX: We assume no fragmentation
+        data = self.client_socket.recv(1024 * 1024)
         if not data:
             # Connection is closed
-            self.unregister_from_reactor()
-        # XXX: We assume no fragmentation
-        self.server_socket.send(data)
+            self.close()
+            return
+        self.server_socket.sendall(data)
 
     def handle_server_response(self):
-        print('handle_server_response!')
-        try:
-            response = http.client.HTTPResponse(self.server_socket)
-            response.begin()
-            data = response.read()
-        except Exception as e:
+        # XXX: We assume no fragmentation
+        current_data = self.server_socket.recv(1024 * 1024)
+        if not current_data:
             # Connection is closed
-            print('Break by exception %s' % (e, ))
-            self.unregister_from_reactor()
-
-        if not response:
-            self.unregister_from_reactor()
-        if CONTENT_TYPE in parsed_data:
-            print(parsed_data[CONTENT_TYPE])
-            if parsed_data[CONTENT_TYPE] in REJECTED_CONTENT_TYPES:
-                # DROP
-                self.unregister_from_reactor()
+            self.close()
+            return
+        self.response += current_data
+        if self.is_bad_response():
+            self.close()
         else:
-            self.client_socket.send(response)
+            self.client_socket.sendall(current_data)
+
+    def is_bad_response(self):
+        try:
+            response_line, headers_alone = self.response.split(b'\r\n', 1)
+            headers = BytesParser().parsebytes(headers_alone)
+            if CONTENT_TYPE in headers:
+                if headers[CONTENT_TYPE] in REJECTED_CONTENT_TYPES:
+                    print('HTTP Proxy blocked response with %s of %s' % (CONTENT_TYPE, headers[CONTENT_TYPE], ))
+                    return True
+                else:
+                    print('headers[CONTENT_TYPE]="%s" is OK' % (headers[CONTENT_TYPE], ))
+
+        except Exception as e:
+            print('Error parsing HTTP response: %s' % (e, ))
+
+        return False
 
 
 class HTTPProxy(proxy_server.ProxyServer):

@@ -4,7 +4,7 @@ import socket
 import select
 import struct
 
-LOCAL_ADDRESS = '127.0.0.1'
+ANY_ADDRESS = '0.0.0.0'
 CONNECTION_READ_PATH = '/sys/class/fw/conns/conns'
 BACKLOG = 50
 
@@ -24,17 +24,21 @@ class Reactor(object):
         del self._read_handlers[fd]
 
     def run_epoch(self):
-        r_ready, _, _ = select.select(self._read_fds, [], [])
-        print('selected stuff!')
+        r = list(self._read_fds)
+        r_ready, _, _ = select.select(r, [], [])
         for r_fd in r_ready:
+            # The FD could have been already removed by another handler
+            if r_fd not in self._read_handlers:
+                continue
             try:
-                self._read_fds[r_fd]()
+                self._read_handlers[r_fd]()
             except Exception as e:
-                print('Error: reactor handler failed - %s' % (e, ))
+                print('Error: reactor handler failed: %s' % (e, ))
 
 
 class ConnectionEntry(object):
     ENTRY_FORMAT = '!' + 'LHLHB' * 2
+    ENTRY_FORMAT_WRITE = '!LHLH'
     def __init__(self, raw_entry):
         if len(raw_entry) != struct.calcsize(self.ENTRY_FORMAT):
             raise ValueError('entry has inapropriate length %d (need %d)' % (len(raw_entry), struct.calcsize(self.ENTRY_FORMAT),  ))
@@ -46,7 +50,6 @@ class ConnectionEntry(object):
         self.peer_socket = None
 
     def entry_to_address(cls, entry):
-        print(entry[0], type(entry[0]))
         saddr = socket.inet_ntoa(struct.pack('!L', entry[0]))
         sport = entry[1]
         daddr = socket.inet_ntoa(struct.pack('!L', entry[2]))
@@ -79,10 +82,18 @@ class ConnectionEntry(object):
                        for i in range(0, len(data), entry_length)]
             return entries
 
+    @property
+    def src_addr(self):
+        return self._src_addr
+
+    @property
+    def dest_addr(self):
+        return self._dest_addr
+
 
 class ClientHandler(object):
     def __init__(self, connection_entry):
-        self._entry = entry
+        self._entry = connection_entry
 
     @property
     def client_socket(self):
@@ -97,9 +108,9 @@ class ClientHandler(object):
         reactor.register_read(self.server_socket.fileno(), self.handle_server_response)
         self._reactor = reactor
 
-    def uregister_from_reactor(self):
-        reactor.unregister_read(self.client_socket.fileno())
-        reactor.unregister_read(self.server_socket.fileno())
+    def unregister_from_reactor(self):
+        self._reactor.unregister_read(self.client_socket.fileno())
+        self._reactor.unregister_read(self.server_socket.fileno())
 
     def handle_client_request(self):
         raise NotImplementedError()
@@ -107,9 +118,17 @@ class ClientHandler(object):
     def handle_server_response(self):
         raise NotImplementedError()
 
+    def close(self):
+        self.unregister_from_reactor()
+        self.client_socket.close()
+        self.server_socket.close()
+
+    def __del_(self):
+        print('ClientHandler bye')
+
 
 class ProxyServer(object):
-    def __init__(self, listen_port, bind_addr=LOCAL_ADDRESS, backlog=BACKLOG):
+    def __init__(self, listen_port, bind_addr=ANY_ADDRESS, backlog=BACKLOG):
         self._bind_addr = bind_addr
         self._listen_port = listen_port
         self._backlog = backlog
@@ -120,6 +139,7 @@ class ProxyServer(object):
 
     def listen(self):
         s = socket.socket()
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind((self._bind_addr, self._listen_port))
         s.listen(self._backlog)
         self._socket = s
@@ -143,21 +163,22 @@ class ProxyServer(object):
         entry.orig_socket = client_socket
         entry.peer_socket = socket.socket()
         try:
-            print('Proxy: connecting to %s' % (entry.get_peer(), ))
-            entry.peer_socket.connect(entry.get_peer())
+            print('Proxy: connecting to %s' % (entry.get_peer(client_addr), ))
+            entry.peer_socket.connect(entry.get_peer(client_addr))
         except Exception as e:
             print('ERROR connecting to peer: %s' % (e, ))
             client_socket.close()
             return
 
         # 4. Save client sockets
-        entry.register_to_reactor(self._reactor)
+        handler = self.create_client_handler(entry)
+        handler.register_to_reactor(self._reactor)
 
     @classmethod
     def read_connection_entry(cls, addr):
         entries = ConnectionEntry.read_entries()
         for entry in entries:
-            if addr in entry:
+            if addr == entry:
                 return entry
         return None
 
@@ -165,9 +186,14 @@ class ProxyServer(object):
         if not self._is_listening:
             self.listen()
 
+        print('Listening on %s:%d...' % (self._bind_addr, self._listen_port, ))
         self._reactor.register_read(self._socket.fileno(), self.accept_client)
         while True:
-            self._reactor.run_epoch()
+            try:
+                self._reactor.run_epoch()
+            except Exception as e:
+                print('error %s' % (e, ))
 
     def create_client_handler(self, entry):
         raise NotImplementedError()
+

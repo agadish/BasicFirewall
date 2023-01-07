@@ -15,15 +15,16 @@ FTP_FILE_PORT = 20
 
 
 class FTPClientHandler(proxy_server.ClientHandler):
-    def register_entry(self, entry_raw):
+    def _register_entry(self, entry_raw):
         with open(CONNECTION_WRITE_PATH, 'wb') as f:
             f.write(entry_raw)
 
     def hook_data(self, data):
         data_match = PORT_REQUEST_REGEX.match(data)
-        print('Found a port request: %s' % (data, ))
         if data_match:
+            print('Found a port request: %s' % (data, ))
             ip1, ip2, ip3, ip4, port1, port2 = data_match.groups()
+
             listen_ip = b'.'.join([ip1, ip2, ip3, ip4]).decode('utf-8')
             print('listen_ip=%s'%(listen_ip, ))
             listen_port = int(port1) * 256 + int(port2)
@@ -34,7 +35,7 @@ class FTPClientHandler(proxy_server.ClientHandler):
             peer_addr = (socket.inet_aton(dest_ip), struct.pack('!H', dest_port), )
             entry_raw = b'%s%s%s%s' % (*listen_src, *peer_addr, )
 
-            self.register_entry(entry_raw)
+            self._register_entry(entry_raw)
 
     def handle_client_request(self):
         data = self.client_socket.recv(1024 * 1024)
@@ -44,7 +45,7 @@ class FTPClientHandler(proxy_server.ClientHandler):
             self.close()
             return
         # XXX: We assume no fragmentation
-        self.server_socket.send(data)
+        self.server_socket.sendall(data)
 
     def handle_server_response(self):
         data = self.server_socket.recv(1024 * 1024)

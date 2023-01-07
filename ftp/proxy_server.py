@@ -24,13 +24,16 @@ class Reactor(object):
         del self._read_handlers[fd]
 
     def run_epoch(self):
-        r_ready, _, _ = select.select(self._read_fds, [], [])
+        r = list(self._read_fds)
+        r_ready, _, _ = select.select(r, [], [])
         for r_fd in r_ready:
+            # The FD could have been already removed by another handler
+            if r_fd not in self._read_handlers:
+                continue
             try:
                 self._read_handlers[r_fd]()
             except Exception as e:
-                print('Error: reactor handler failed - %s' % (e, ))
-                raise # XXX: remove
+                print('Error: reactor handler failed: %s' % (e, ))
 
 
 class ConnectionEntry(object):
@@ -116,7 +119,6 @@ class ClientHandler(object):
         raise NotImplementedError()
 
     def close(self):
-        print('ClientHandler: close')
         self.unregister_from_reactor()
         self.client_socket.close()
         self.server_socket.close()
@@ -163,7 +165,6 @@ class ProxyServer(object):
         try:
             print('Proxy: connecting to %s' % (entry.get_peer(client_addr), ))
             entry.peer_socket.connect(entry.get_peer(client_addr))
-            print('Proxy: connected')
         except Exception as e:
             print('ERROR connecting to peer: %s' % (e, ))
             client_socket.close()
@@ -192,7 +193,6 @@ class ProxyServer(object):
                 self._reactor.run_epoch()
             except Exception as e:
                 print('error %s' % (e, ))
-                raise # XXX: remove
 
     def create_client_handler(self, entry):
         raise NotImplementedError()
