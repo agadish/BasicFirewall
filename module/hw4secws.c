@@ -13,6 +13,7 @@
 #include <linux/cdev.h>
 #include <asm/string.h>
 
+#include "net_utils.h"
 #include "common.h"
 #include "rule_table.h"
 #include "fw_log.h"
@@ -390,7 +391,7 @@ fw_hook__unknown_protocol_or_xmas(struct sk_buff *skb, __u8 *nf_action__out)
     bool_t is_handled = FALSE;
     __u8 action = NF_DROP;
 
-    if (RULE_TABLE_is_xmas_packet(skb)) {
+    if (NET_UTILS_is_xmas_packet(skb)) {
         /* 1. Check if xmas packet, if so then drop and log */
         is_handled = TRUE;
         action = NF_DROP;

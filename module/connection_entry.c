@@ -1,5 +1,5 @@
 /**
- * @file connection.c
+ * @file connection_entry.c
  * @author Assaf Gadish
  *
  * @brief Connection functions
@@ -8,15 +8,17 @@
 /*   I N C L U D E S   */
 #include <linux/types.h>
 #include <linux/skbuff.h>
+#include <linux/tcp.h>
 #include <net/tcp.h>
-#include <linux/netdevice.h>
-#include <linux/inetdevice.h>
 #include <linux/ip.h>
 
 #include "common.h"
+#include "net_utils.h"
 #include "fw.h"
-#include "connection_entry.h"
 #include "fw_results.h"
+#include "connection.h"
+
+#include "connection_entry.h"
 
 
 /*   M A C R O S   */
@@ -42,10 +44,6 @@ proxy_entry_init_by_id(proxy_connection_entry_t *entry,
                        const connection_id_t *id);
 
 static void
-connection_id_flip(connection_id_t *dest,
-                   const connection_id_t *src);
-
-static void
 proxy_init_proxy_ports(proxy_connection_entry_t *entry,
                        uint16_t dst_port_n);
 
@@ -58,9 +56,6 @@ static void
 proxy_entry_local_out_hook(proxy_connection_entry_t *entry,
                            struct sk_buff *skb,
                            packet_direction_t skb_cmp_result);
-
-static uint32_t
-get_local_ip__network_order(struct net_device *dev);
 
 static packet_direction_t
 entry_compare_packet_pre_routing(connection_entry_t *entry,
@@ -78,12 +73,6 @@ static packet_direction_t
 proxy_entry_compare_packet_local_out(proxy_connection_entry_t *entry,
                                      const struct sk_buff *skb);
 
-static bool_t
-does_connection_id_match_skb(connection_id_t *id,
-                             const struct sk_buff *skb);
-
-static bool_t
-fix_checksum(struct sk_buff *skb);
 
 /**
  * @remark The returned entry must be freed by calling entry_destory
@@ -133,15 +122,6 @@ proxy_entry_get_conn_by_cmp(proxy_connection_entry_t *entry,
                       packet_direction_t cmp_res,
                       single_connection_t **src_out,
                       single_connection_t **dst_out);
-
-static void
-conn_init_by_skb(connection_t *conn,
-                 const struct sk_buff *skb);
-
-static void
-conn_init_by_id(connection_t *conn,
-                const connection_id_t *id);
-
 static bool_t
 entry_is_closed(connection_entry_t *entry);
 
@@ -150,7 +130,7 @@ proxy_entry_is_closed(proxy_connection_entry_t *entry);
 
 
 /* static void */
-/* conn_init_by_inverse_conn(connection_t *conn, */
+/* CONNECTION_init_by_inverse_conn(connection_t *conn, */
 /*                           const connection_t *inverse_conn); */
 
 char g_skb_string_buff[1024];
@@ -287,74 +267,11 @@ l_cleanup:
 }
 
 static void
-conn_init_by_skb(connection_t *conn,
-                 const struct sk_buff *skb)
-{
-    struct iphdr *ip_header = NULL;
-    struct tcphdr *tcp_header = NULL;
-
-    /* 0. Input validation */
-    if ((NULL == conn) || (NULL == skb)) {
-        goto l_cleanup;
-    }
-
-    /* 1. ID initialization */
-    ip_header = ip_hdr(skb);
-    tcp_header = tcp_hdr(skb);
-
-    conn->opener.id.src_ip = ip_header->saddr;
-    conn->opener.id.dst_ip = ip_header->daddr;
-    conn->opener.id.src_port = tcp_header->source;
-    conn->opener.id.dst_port = tcp_header->dest;
-
-    connection_id_flip(&conn->listener.id, &conn->opener.id);
-    /* printk(KERN_INFO "%s: flipped. conn=%s\n", __func__, CONN_str(conn)); */
-
-    /* 2. State initialiation */
-    conn->opener.state = TCP_CLOSE;
-    conn->listener.state = TCP_CLOSE;
-
-l_cleanup:
-    return;
-}
-
-static void
-conn_init_by_id(connection_t *conn,
-                const connection_id_t *id)
-{
-    /* 0. Input validation */
-    if ((NULL == conn) || (NULL == id)) {
-        goto l_cleanup;
-    }
-
-    /* 1. ID initialization */
-    (void)memcpy(&conn->opener.id, id, sizeof(*id));
-    connection_id_flip(&conn->listener.id, id);
-
-    /* 2. State initialiation */
-    conn->opener.state = TCP_CLOSE;
-    conn->listener.state = TCP_CLOSE;
-
-l_cleanup:
-    return;
-}
-
-/* static void */
-/* conn_init_by_inverse_conn(connection_t *conn, */
-/*                           const connection_t *inverse_conn) */
-/* { */
-/*     (void)memcpy(&conn->opener, &inverse_conn->listener, sizeof(conn->opener)); */
-/*     (void)memcpy(&conn->listener, &inverse_conn->opener, sizeof(conn->opener)); */
-/*     printk(KERN_INFO "%s: init by inverse conn\norig: %s\n", __func__, CONN_str(inverse_conn)); */
-/*     printk(KERN_INFO "inverse: %s\n", CONN_str(inverse_conn)); */
-/* } */
-
-static void
 entry_init_by_skb(connection_entry_t *entry,
                   const struct sk_buff *skb)
 {
     if ((NULL != entry) && (NULL != skb)) {
-        conn_init_by_skb(entry->conn, skb);
+        CONNECTION_init_by_skb(entry->conn, skb);
     }
 }
 
@@ -363,7 +280,7 @@ entry_init_by_id(connection_entry_t *entry,
                  const connection_id_t *id)
 {
     if ((NULL != entry) && (NULL != id)) {
-        conn_init_by_id(entry->conn, id);
+        CONNECTION_init_by_id(entry->conn, id);
     }
 }
 
@@ -380,8 +297,8 @@ proxy_entry_init_by_skb(proxy_connection_entry_t *entry,
 
     tcp_header = tcp_hdr(skb);
     /* 1. Init connections */
-    conn_init_by_skb((connection_t *)entry->client_conn, skb);
-    conn_init_by_skb((connection_t *)entry->server_conn, skb);
+    CONNECTION_init_by_skb((connection_t *)entry->client_conn, skb);
+    CONNECTION_init_by_skb((connection_t *)entry->server_conn, skb);
 
     /* 2. Proxy ports */
     proxy_init_proxy_ports(entry, tcp_header->dest);
@@ -400,66 +317,14 @@ proxy_entry_init_by_id(proxy_connection_entry_t *entry,
     }
 
     /* 1. Init connections */
-    conn_init_by_id((connection_t *)entry->client_conn, id);
-    conn_init_by_id((connection_t *)entry->server_conn, id);
+    CONNECTION_init_by_id((connection_t *)entry->client_conn, id);
+    CONNECTION_init_by_id((connection_t *)entry->server_conn, id);
 
     /* 2. Proxy ports */
     proxy_init_proxy_ports(entry, id->dst_port);
 
 l_cleanup:
     return;
-}
-
-static void
-connection_id_flip(connection_id_t *result,
-                   const connection_id_t *origin)
-{
-    result->dst_ip = origin->src_ip;
-    result->dst_port = origin->src_port;
-    result->src_ip = origin->dst_ip;
-    result->src_port = origin->dst_port;
-}
-
-static bool_t
-fix_checksum(struct sk_buff *skb)
-{
-    bool_t should_be_dropped = FALSE;
-    uint16_t tcplen = 0;
-    struct iphdr *ip_header = ip_hdr(skb);
-    struct tcphdr *tcp_header = tcp_hdr(skb);
-    
-    /* Fix IP header checksum */
-    ip_header->check = 0;
-    ip_header->check = ip_fast_csum((u8 *)ip_header, ip_header->ihl);
-
-    /*
-     * From Linux doc here: https://elixir.bootlin.com/linux/v4.15/source/include/linux/skbuff.h#L90
-     * CHECKSUM_NONE:
-     *
-     *   Device did not checksum this packet e.g. due to lack of capabilities.
-     *   The packet contains full (though not verified) checksum in packet but
-     *   not in skb->csum. Thus, skb->csum is undefined in this case.
-     */
-    skb->ip_summed = CHECKSUM_NONE;
-    skb->csum_valid = 0;
-
-    /* Linearize the skb */
-    if (skb_linearize(skb) < 0) {
-        should_be_dropped = TRUE;
-        goto l_cleanup;
-   }
-
-    ip_header = ip_hdr(skb);
-    tcp_header = tcp_hdr(skb);
-
-    /* Fix TCP header checksum */
-    tcplen = (ntohs(ip_header->tot_len) - ((ip_header->ihl) << 2));
-    tcp_header->check = 0;
-    tcp_header->check = tcp_v4_check(tcplen, ip_header->saddr, ip_header->daddr, csum_partial((char *)tcp_header, tcplen, 0));
-
-l_cleanup:
-
-    return should_be_dropped;
 }
 
 static void
@@ -484,37 +349,6 @@ proxy_init_proxy_ports(proxy_connection_entry_t *entry,
     }
 }
 
-static uint32_t
-get_local_ip__network_order(struct net_device *dev)
-{
-    uint32_t result = 0;
-    struct in_device *in_dev = NULL;
-    struct in_ifaddr *ifa = NULL;
-
-    if (NULL == dev) {
-        printk(KERN_ERR "%s: got NULL - returning 0\n", __func__);
-        result = 0;
-        goto l_cleanup;
-    }
-
-    in_dev = (struct in_device *)dev->ip_ptr;
-    if (NULL != in_dev) {
-        ifa = in_dev->ifa_list;
-        if (NULL != ifa) {
-            result = ifa->ifa_address;
-        } else {
-            printk(KERN_ERR "%s: device doesn't have an IP\n", __func__);
-        }
-    } else {
-        printk(KERN_ERR "%s: device doesn't have an IP\n", __func__);
-    }
-
-
-l_cleanup:
-
-    return result;
-}
-
 static packet_direction_t
 entry_compare_packet_pre_routing(connection_entry_t *entry,
                                  const struct sk_buff *skb)
@@ -530,10 +364,10 @@ entry_compare_packet_pre_routing(connection_entry_t *entry,
 
     ip_header = ip_hdr(skb);
     tcp_header = tcp_hdr(skb);
-    if (does_connection_id_match_skb(&entry->conn->opener.id, skb)) {
+    if (CONNECTION_does_id_match_skb(&entry->conn->opener.id, skb)) {
         /* Client to proxy */
         result = PACKET_DIRECTION_FROM_CLIENT;
-    } else if (does_connection_id_match_skb(&entry->conn->listener.id, skb)) {
+    } else if (CONNECTION_does_id_match_skb(&entry->conn->listener.id, skb)) {
         /* Server to proxy */
         result = PACKET_DIRECTION_FROM_SERVER;
     }
@@ -559,10 +393,10 @@ proxy_entry_compare_packet_pre_routing(proxy_connection_entry_t *pentry,
     ip_header = ip_hdr(skb);
     tcp_header = tcp_hdr(skb);
     /* Note: relying on client_conn and server_conn having the same IDs */
-    if (does_connection_id_match_skb(&pentry->client_conn->opener.id, skb)) {
+    if (CONNECTION_does_id_match_skb(&pentry->client_conn->opener.id, skb)) {
         /* Client to proxy */
         result = PACKET_DIRECTION_FROM_CLIENT;
-    } else if (does_connection_id_match_skb(&pentry->client_conn->listener.id, skb)) {
+    } else if (CONNECTION_does_id_match_skb(&pentry->client_conn->listener.id, skb)) {
         /* Server to proxy */
         result = PACKET_DIRECTION_FROM_SERVER;
     }
@@ -617,32 +451,13 @@ l_cleanup:
 }
 
 static bool_t
-does_connection_id_match_skb(connection_id_t *id,
-                             const struct sk_buff *skb)
-{
-    bool_t does_match = FALSE;
-    struct iphdr *ip_header = ip_hdr(skb);
-    struct tcphdr *tcp_header = tcp_hdr(skb);
-
-    if ((ip_header->saddr == id->src_ip) &&
-        (tcp_header->source == id->src_port) &&
-        (ip_header->daddr == id->dst_ip) &&
-        (tcp_header->dest == id->dst_port))
-    {
-        does_match = TRUE;
-    }
-
-    return does_match;
-}
-
-static bool_t
 proxy_entry_is_to_client(proxy_connection_entry_t *pentry,
                          const struct sk_buff *skb)
 {
     bool_t does_match = FALSE;
     struct iphdr *ip_header = ip_hdr(skb);
     struct tcphdr *tcp_header = tcp_hdr(skb);
-    uint32_t local_ip = get_local_ip__network_order(skb->dev);
+    uint32_t local_ip = NET_UTILS_get_local_ip__network_order(skb->dev);
     bool_t is_src_ip_from_localhost = FALSE;
     bool_t is_src_port_match = FALSE;
     bool_t is_dst_ip_match = FALSE;
@@ -676,7 +491,7 @@ proxy_entry_is_to_server(proxy_connection_entry_t *pentry,
     bool_t does_match = FALSE;
     struct iphdr *ip_header = ip_hdr(skb);
     struct tcphdr *tcp_header = tcp_hdr(skb);
-    uint32_t local_ip = get_local_ip__network_order(skb->dev);
+    uint32_t local_ip = NET_UTILS_get_local_ip__network_order(skb->dev);
     bool_t is_src_ip_from_localhost = FALSE;
     bool_t is_src_port_match = FALSE;
     bool_t is_src_port_misconfigured = FALSE;
@@ -715,7 +530,7 @@ proxy_entry_pre_routing_hook(proxy_connection_entry_t *entry,
     switch (cmp_result) 
     {
     case PACKET_DIRECTION_FROM_CLIENT:
-        ip_header->daddr = get_local_ip__network_order(skb->dev);
+        ip_header->daddr = NET_UTILS_get_local_ip__network_order(skb->dev);
         if (0 == ip_header->daddr) {
             printk(KERN_ERR "%s (skb=%s): dest addr from clientis 0\n", __func__, SKB_str(skb));
             /* XXX: log? */
@@ -725,7 +540,7 @@ proxy_entry_pre_routing_hook(proxy_connection_entry_t *entry,
                 ntohl(ip_header->daddr), ntohs(tcp_header->dest));
         break;
     case PACKET_DIRECTION_FROM_SERVER:
-        ip_header->daddr = get_local_ip__network_order(skb->dev);
+        ip_header->daddr = NET_UTILS_get_local_ip__network_order(skb->dev);
         if (0 == ip_header->daddr) {
             printk(KERN_ERR "%s (skb=%s): dest addr from server is 0\n", __func__, SKB_str(skb));
             /* XXX: log? */
@@ -743,7 +558,7 @@ proxy_entry_pre_routing_hook(proxy_connection_entry_t *entry,
 
     /* Ignore failure of checksum */
     if (was_modified) {
-        (void)fix_checksum(skb);
+        (void)NET_UTILS_fix_checksum(skb);
     }
 }
 
@@ -789,7 +604,7 @@ proxy_entry_local_out_hook(proxy_connection_entry_t *entry,
 
     /* Ignore failure of checksum */
     if (was_modified) {
-        (void)fix_checksum(skb);
+        (void)NET_UTILS_fix_checksum(skb);
     }
 }
 

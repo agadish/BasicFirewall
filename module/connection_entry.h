@@ -12,6 +12,7 @@
 #include <linux/types.h>
 #include <linux/skbuff.h>
 
+#include "connection.h"
 #include "fw.h"
 #include "fw_results.h"
 
@@ -21,6 +22,7 @@
 #define HTTP_USER_PORT_N (htons(800))
 #define FTP_PORT_N (htons(21))
 #define FTP_USER_PORT_N (htons(210))
+
 
 /*   M A C R O S   */
 #define _ENTRY_VTBL(entry) (((connection_entry_t *)(entry))->_vtbl)
@@ -53,12 +55,8 @@
 
 #define CMP_IS_SERVER_TO_CLIENT(cmp) ((PACKET_DIRECTION_FROM_SERVER == (cmp)) || (PACKET_DIRECTION_TO_CLIENT == (cmp)))
 
-/*   E N U M S   */
-typedef enum connection_type_e {
-    CONNECTION_TYPE_DIRECT = 0,
-    CONNECTION_TYPE_PROXY
-} connection_type_t;
 
+/*   E N U M S   */
 typedef enum packet_direction_e {
     PACKET_DIRECTION_MISMATCH = 0,
     PACKET_DIRECTION_FROM_CLIENT,
@@ -69,12 +67,9 @@ typedef enum packet_direction_e {
 
 
 /*   T Y P E D E F S   */
-typedef struct connection_s connection_t;
-typedef struct proxy_connection_s proxy_connection_t;
-typedef struct connection_id_s connection_id_t;
-typedef struct single_connection_s single_connection_t;
 typedef struct connection_entry_s connection_entry_t;
 typedef struct proxy_connection_entry_s proxy_connection_entry_t;
+
 typedef result_t (*entry_create_f)(connection_entry_t **entry_out);
 typedef void (*entry_init_by_id_f)(connection_entry_t *entry,
                                    const connection_id_t *id);
@@ -100,6 +95,7 @@ typedef size_t (*dump_entry_f)(const connection_entry_t *entry,
 
 typedef bool_t (*entry_is_closed_f)(connection_entry_t *entry);
 
+
 /*   S T R U C T S   */
 typedef struct connection_entry_vtbl_s {
     connection_type_t type;
@@ -115,33 +111,6 @@ typedef struct connection_entry_vtbl_s {
     dump_entry_f dump;
     get_conn_by_cmp_f get_conn_by_cmp;
 } connection_entry_vtbl_t;
-
-#pragma pack(1)
-struct connection_id_s {
-    __u32 src_ip;
-    __u16 src_port;
-    __u32 dst_ip;
-    __u16 dst_port;
-};
-
-#pragma pack(1)
-struct single_connection_s {
-    connection_id_t id;
-    __u8 state;
-};
-
-#pragma pack(1)
-typedef struct connection_s {
-    single_connection_t opener;
-    single_connection_t listener;
-} connection_t;
-
-#pragma pack(1)
-typedef struct proxy_connection_s {
-    single_connection_t opener;
-    single_connection_t listener;
-    __u16 proxy_port;
-} proxy_connection_t;
 
 struct connection_entry_s {
     struct klist_node node;
@@ -161,8 +130,6 @@ struct proxy_connection_entry_s {
         connection_t *server_conn_nonproxy;
     };
 };
-
-
 
 
 /*   G L O B A L S   */

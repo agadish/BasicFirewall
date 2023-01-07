@@ -13,6 +13,7 @@
 #include "fw.h"
 #include "fw_log.h"
 #include "common.h"
+#include "net_utils.h"
 
 #include "connection_entry.h"
 #include "connection_table.h"
@@ -28,15 +29,6 @@ struct connection_table_s {
 
 
 /*   F U N C T I O N S   D E C L A R A T I O N S   */
-/**
- * @brief 
- * 
- * @param[in] skb
- *
- * @return TRUE if SYN packet, otherwise FALSE
- */
-static bool_t
-is_syn_packet(const struct tcphdr *tcp_header);
 
 static bool_t
 tcp_machine_state(single_connection_t *sender,
@@ -114,16 +106,6 @@ CONNECTION_TABLE_destroy(connection_table_t *table)
     }
 
     klist_iter_exit(&list_iter);
-}
-
-static bool_t
-is_syn_packet(const struct tcphdr *tcp_header)
-{
-    bool_t is_syn_packet = FALSE;
-
-    is_syn_packet = (0 == tcp_header->ack) ? TRUE : FALSE;
-
-    return is_syn_packet;
 }
 
 bool_t
@@ -505,7 +487,7 @@ CONNECTION_TABLE_handle_accepted_syn(connection_table_t *table,
         goto l_cleanup;
     }
     tcp_header = tcp_hdr(skb);
-    if (!is_syn_packet(tcp_header)) {
+    if (!NET_UTILS_is_syn_packet(tcp_header)) {
         result = E__SUCCESS;
         goto l_cleanup;
     }

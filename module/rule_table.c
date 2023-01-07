@@ -12,30 +12,16 @@
 #include "fw.h"
 #include "fw_log.h"
 #include "common.h"
+#include "net_utils.h"
 
 #include "rule_table.h"
 
 
 /*   M A C R O S   */
-/**
- * @brief ack_t has 2 values: 0x1, 0x2, and their combination.
- *        We want to return FALSE for 0x1, and return TRUE for other values.
- *        XORing the ack bit with the ack_t value does the job
- */
-#define DOES_ACK_MATCH(tcp_header, rule) (((tcp_header)->ack) ^ (rule)->ack)
-
-#define IN_INTERFACE "enp0s8"
-#define OUT_INTERFACE "enp0s9"
-#define DEBUG_INTERFACE "enp0s3"
-#define LO_INTERFACE "lo"
 #define PORT_1023 (1023)
 #define PORT_MORE_THAN_1023 (1024)
 #define PORT_MORE_THAN_1023_N (ntohs(PORT_MORE_THAN_1023))
 
-#define IS_XMAS_TCP_HEADER(tcp_hdr) ((0 != (tcp_hdr)->fin) && \
-                                     (0 != (tcp_hdr)->urg) && \
-                                     (0 != (tcp_hdr)->psh))
-#define GET_IP_MASK(n) ((0 == (n)) ? 0 : (~((1 << (32 - (n))) - 1)))
 
 
 /*   F U N C T I O N S   D E C L A R A T I O N S   */
@@ -49,37 +35,6 @@
  */
 static bool_t
 does_match_rule(const rule_t *rule, const struct sk_buff *skb);
-
-/**
- * @brief Check if an inet packet should be ignored (aka non TCP, UDP nor ICMP)
- * 
- * @param[in] skb
- *
- * @return TRUE if TCP/UDP/ICMP packet, otherwise FALSE
- */
-static bool_t
-is_tcp_udp_icmp_packet(const struct sk_buff *skb);
-
-/**
- * @brief Check if a packet is loopback - source+destionation is 127.0.0.1/8
- * 
- * @param[in] skb
- *
- * @return TRUE if loopback packet, otherwise FALSE
- */
-static bool_t
-is_loopback_packet(const struct sk_buff *skb);
-
-/**
- * @brief Determine if a packet has came
- * 
- * @param[in] skb The packet to check
- *
- * @return The direction of the packet. Note: If the packet neither comes from
- *         the IN or OUT interface, the function will return DIRECTION_UNKNOWN
- */
-static direction_t
-get_packet_direction(const struct sk_buff *skb);
 
 /**
  * @brief Check if a rules array is valid
@@ -135,14 +90,14 @@ is_rule_valid(const rule_t *r)
 
     /* 3. Mask consistency */
     /* 3.1. Source */
-    if (GET_IP_MASK(r->src_prefix_size) != r->src_prefix_mask) {
+    if (NET_UTILS_GET_IP_MASK(r->src_prefix_size) != r->src_prefix_mask) {
         printk(KERN_INFO
                "Invalid rule: src_prefix_size doesn't match src_prefix_mask\n");
         goto l_cleanup;
     }
 
     /* 3.1. Dst */
-    if (GET_IP_MASK(r->dst_prefix_size) != r->dst_prefix_mask) {
+    if (NET_UTILS_GET_IP_MASK(r->dst_prefix_size) != r->dst_prefix_mask) {
         printk(KERN_INFO "Invalid rule: dst_prefix_size doesn't match dst_prefix_mask\n");
         goto l_cleanup;
     }
@@ -288,8 +243,8 @@ RULE_TABLE_is_freepass(const rule_table_t *table,
 
     /* NOTE: forward chain shouldn't have loopback packets, but this is a
      *       requirement of the exercise */
-    if ((!is_tcp_udp_icmp_packet(skb)) ||
-        is_loopback_packet(skb))
+    if ((!NET_UTILS_is_tcp_udp_icmp_packet(skb)) ||
+        NET_UTILS_is_loopback_packet(skb))
     {
         is_freepass = TRUE;
     }
@@ -297,32 +252,6 @@ RULE_TABLE_is_freepass(const rule_table_t *table,
 l_cleanup:
 
     return is_freepass;
-}
-
-bool_t
-RULE_TABLE_is_xmas_packet(const struct sk_buff *skb)
-{
-    bool_t result = FALSE;
-    struct iphdr *ip_header = NULL;
-    struct tcphdr *tcp_header = NULL;
-
-    /* 0. Input validation */
-    if (NULL == skb) {
-        goto l_cleanup;
-    }
-
-    /* 1. Check if TCP */
-    ip_header = (struct iphdr *)skb_network_header(skb);
-    if (IPPROTO_TCP != ip_header->protocol) { 
-        goto l_cleanup;
-    }
-
-    tcp_header = (struct tcphdr *)skb_transport_header(skb);
-    result = IS_XMAS_TCP_HEADER(tcp_header);
-
-l_cleanup:
-
-    return result;
 }
 
 bool_t
@@ -371,59 +300,6 @@ l_cleanup:
 }
 
 static bool_t
-is_tcp_udp_icmp_packet(const struct sk_buff *skb)
-{
-    bool_t result = FALSE;
-    struct iphdr *ip_header = (struct iphdr *)skb_network_header(skb);
-
-    if ((IPPROTO_TCP == ip_header->protocol) ||
-        (IPPROTO_UDP == ip_header->protocol) ||
-        (IPPROTO_ICMP == ip_header->protocol))
-    {
-        result = TRUE;
-    }
-
-    return result;
-}
-
-static bool_t
-is_loopback_packet(const struct sk_buff *skb)
-{
-    bool_t result = FALSE;
-    char *iface_name = skb->dev->name;
-    size_t name_length = ARRAY_SIZE(skb->dev->name);
-
-    if (0 == strncmp(iface_name, LO_INTERFACE, name_length)) {
-        result = TRUE;
-    }
-
-    return result;
-}
-
-static direction_t
-get_packet_direction(const struct sk_buff *skb)
-{
-    direction_t direction = DIRECTION_ANY;
-    char *iface_name = skb->dev->name;
-    size_t name_length = ARRAY_SIZE(skb->dev->name);
-
-    if (NULL == iface_name) {
-        /* Localhost */
-        direction = DIRECTION_ANY; 
-    }
-    if (0 == strncmp(iface_name, IN_INTERFACE, name_length)) {
-        direction = DIRECTION_IN;
-    } else if (0 == strncmp(iface_name, OUT_INTERFACE, name_length)) {
-        direction = DIRECTION_OUT;
-    } else {
-        /* printk(KERN_INFO "direction UNKNOWN: got %s\n", iface_name); */
-        direction = DIRECTION_UNKNOWN;
-    }
-
-    return direction;
-}
-
-static bool_t
 does_match_rule(const rule_t *rule, const struct sk_buff *skb)
 {
     bool_t does_match = FALSE;
@@ -469,7 +345,7 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
         }
 
         /* 4.3. TCP: match flags */
-        if (!DOES_ACK_MATCH(tcp_header, rule)) {
+        if (!NET_UTILS_DOES_ACK_MATCH(tcp_header, rule)) {
             goto l_cleanup;
         }
     /* 5. UDP specific */
@@ -494,7 +370,7 @@ does_match_rule(const rule_t *rule, const struct sk_buff *skb)
     } /* Note: Nothing ICMP specific */
 
     /* 7. Match direction */
-    direction = get_packet_direction(skb);
+    direction = NET_UTILS_get_packet_direction(skb);
     /* Note: We will get no common bits for DIRECTION_UNKNOWN, or if the rule
      *       doesn't match the packet's direction */
     if (0 == (rule->direction & direction)) {

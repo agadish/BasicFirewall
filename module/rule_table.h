@@ -95,17 +95,5 @@ RULE_TABLE_check(const rule_table_t *table,
                  __u8 *action_out,
                  reason_t *reason_out);
 
-/**
- * @brief Check if a given packet is a TCP packet with FIN+URG+PSH flags
- * 
- * @param[in] skb The packet to check
- *
- * @return TRUE if xmas packet, otherwise FALSE
- *
- * @remark If skb is NULL, the function will return FALSE
- */
-bool_t
-RULE_TABLE_is_xmas_packet(const struct sk_buff *skb);
-
 
 #endif /* __RULE_TABLE_H__ */
