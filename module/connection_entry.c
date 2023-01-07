@@ -582,8 +582,8 @@ proxy_entry_local_out_hook(proxy_connection_entry_t *entry,
 }
 
 result_t
-CONNECTION_ENTRY_create_from_syn(connection_entry_t **entry_out,
-                                  const struct sk_buff *skb)
+CONNECTION_ENTRY_create_from_skb(connection_entry_t **entry_out,
+                                 const struct sk_buff *skb)
 {
     result_t result = E__UNKNOWN;
     connection_entry_t *entry = NULL;
