@@ -19,9 +19,6 @@
 #include "connection_table.h"
 
 
-/*    T Y P E D E F S   */
-
-
 /*    S T R U C T S   */
 struct connection_table_s {
     struct klist list;
@@ -29,26 +26,71 @@ struct connection_table_s {
 
 
 /*   F U N C T I O N S   D E C L A R A T I O N S   */
+/**
+ * @brief Update the states of the sender and the receiver due to a given packet
+ *
+ * @param[inout] sender The packet's sender single connection
+ * @param[inout] receiver The packet's receiver single connection
+ * @param[in] skb The packet
+ *
+ * @return TRUE if at least one of the single connection was closed,
+ *         otherwise FALSE
+ */
 static bool_t
 tcp_machine_state(single_connection_t *sender,
                   single_connection_t *receiver,
                   const struct sk_buff *skb);
 
+/**
+ * @brief Search an entry by a given packet that was captured in PRE_ROUTING
+ *
+ * @param[in] entries_list The list of all entries
+ * @param[in] skb The packet arrived
+ * @param[out] entry_out The result entry, if found
+ *
+ * @return PACKET_DIRECTION_MISMATCH    if not found, otherwise the matching
+ *         PACKET_DIRECTION_FROM_CLIENT if sent from the client
+ *         PACKET_DIRECTION_FROM_SERVER if sent from the server
+ */
 static packet_direction_t
 search_entry__pre_routing(struct klist *entries_list,
                           const struct sk_buff *skb,
                           connection_entry_t **entry_out);
 
+/**
+ * @brief Search an entry by a given packet that was captured in LOCAL_OUT
+ *
+ * @param[in] entries_list The list of all entries
+ * @param[in] skb The packet arrived
+ * @param[out] entry_out The result entry, if found
+ *
+ * @return PACKET_DIRECTION_MISMATCH    if not found, otherwise the matching
+ *         PACKET_DIRECTION_TO_CLIENT if sent to the client
+ *         PACKET_DIRECTION_TO_SERVER if sent to the server
+ */
 static packet_direction_t
 search_entry__local_out(struct klist *entries_list,
                         const struct sk_buff *skb,
                         connection_entry_t **entry_out);
 
+/**
+ * @brief Notify that at least one of the single_connection_t's within an entry
+ *        is closed. The function will check if all the single connections are
+ *        closed, and call _remove_entry accordingly
+ *
+ * @param[in] entry The entry to check
+ */
 static void
 entry_notify_connection_closed(connection_entry_t *entry);
 
-/* XXX: Use entry_notify_connection_closed to remove an established
- *      connection. It will be removed once it's fully closed */
+/**
+ * @brief Remove an entry from the connection table
+ *
+ * @param[in] entry The entry to remove
+ *
+ * @remark Use entry_notify_connection_closed to remove an established
+ *         connection. It will be removed once it's fully closed.
+ */
 static void
 _remove_entry(connection_entry_t *entry);
 
@@ -96,9 +138,11 @@ CONNECTION_TABLE_destroy(connection_table_t *table)
     connection_entry_t *current_entry = NULL;
     connection_entry_t *next_entry = NULL;
 
+    /* 1. Initialise an iterator on the table */
     klist_iter_init((struct klist *)&table->list, &list_iter);
     current_entry = (connection_entry_t *)klist_next(&list_iter);
 
+    /* 2. Remove each entry from the list and detroy its internals */
     while (NULL != current_entry) {
         next_entry = (connection_entry_t *)klist_next(&list_iter);
         klist_del(&current_entry->node);
@@ -106,6 +150,7 @@ CONNECTION_TABLE_destroy(connection_table_t *table)
         current_entry = next_entry;
     }
 
+    /* 3. Clean the iterator */
     klist_iter_exit(&list_iter);
 }
 
@@ -431,7 +476,7 @@ CONNECTION_TABLE_add_by_skb(connection_table_t *table,
     }
 
     /* 1. Create connection entry */
-    result = CONNECTION_ENTRY_create_from_syn(&entry, skb);
+    result = CONNECTION_ENTRY_create_from_skb(&entry, skb);
     if (E__SUCCESS != result) {
         goto l_cleanup;
     }
@@ -539,7 +584,6 @@ _remove_entry(connection_entry_t *entry)
     }
 }
 
-
 result_t
 CONNECTION_TABLE_remove_by_skb(connection_table_t *table,
                                const struct sk_buff *skb)
@@ -555,11 +599,13 @@ CONNECTION_TABLE_remove_by_skb(connection_table_t *table,
         goto l_cleanup;
     }
 
+    /* 1. Search the entry */
     direction = search_entry__pre_routing(&table->list,
                                           skb,
                                           &entry);
     /* If entry not found - return success */
     if (PACKET_DIRECTION_MISMATCH != direction) {
+        /* 2. Remove it */
         _remove_entry(entry);
     }
 

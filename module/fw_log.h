@@ -23,7 +23,7 @@
  * 
  * @param[init] The new table
  *
- * @return TRUE on success, FALSE on failure
+ * @return E__SUCCESS on success, other result_t values on failure
  */
 void
 FW_LOG_init(void);

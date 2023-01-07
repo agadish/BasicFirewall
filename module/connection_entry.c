@@ -542,7 +542,7 @@ proxy_entry_pre_routing_hook(proxy_connection_entry_t *entry,
 
     /* Ignore failure of checksum */
     if (was_modified) {
-        (void)NET_UTILS_fix_checksum(skb);
+        (void)NET_UTILS_fix_checksums(skb);
     }
 }
 
@@ -577,7 +577,7 @@ proxy_entry_local_out_hook(proxy_connection_entry_t *entry,
 
     /* Ignore failure of checksum */
     if (was_modified) {
-        (void)NET_UTILS_fix_checksum(skb);
+        (void)NET_UTILS_fix_checksums(skb);
     }
 }
 

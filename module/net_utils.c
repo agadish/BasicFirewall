@@ -1,6 +1,6 @@
 /**
  * @file net_utils.c
- * @author Assaf Gadish
+ * @author Assaf Gadish, Reuven Plevinsky
  *
  * @brief sk_buff helper functions
  *        Written for course "Workshop in Information Security", TAU 2022-23.
@@ -28,11 +28,8 @@
 
 
 /*   F U N C T I O N S    I M P L E M E N T A T I O N S   */
-/**
- * @author https://www.github.com/reuvenpl/checksum
- */
 bool_t
-NET_UTILS_fix_checksum(struct sk_buff *skb)
+NET_UTILS_fix_checksums(struct sk_buff *skb)
 {
     bool_t was_fixed = FALSE;
     uint16_t tcplen = 0;

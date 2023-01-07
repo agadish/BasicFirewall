@@ -99,7 +99,7 @@ fw_hook__unknown_protocol_or_xmas(struct sk_buff *skb, __u8 *nf_action__out);
  * @param[in] skb The packet's socket buffer (ignored)
  * @param[in] state The packet's netfilter hook state (ignored)
  *
- * @return NF_ACCEPT
+ * @return NF_ACCEPT or NF_DROP
  */
 static unsigned int
 hw4secws_nf_hook_pre_routing(void *priv,
@@ -113,7 +113,7 @@ hw4secws_nf_hook_pre_routing(void *priv,
  * @param[in] skb The packet's socket buffer (ignored)
  * @param[in] state The packet's netfilter hook state (ignored)
  *
- * @return NF_ACCEPT
+ * @return NF_ACCEPT or NF_DROP
  */
 static unsigned int
 hw4secws_nf_hook_local_out(void *priv,
@@ -305,24 +305,70 @@ fw_log_open(struct inode *fw_log_inode, struct file *fw_log_file);
 static int
 fw_log_release(struct inode *fw_log_inode, struct file *fw_log_file);
 
+/**
+ * @brief Hook that DROPs XMAS packets and ACCEPT non TCP/UDP/ICMP packets
+ * @see fw_hook_f
+ */
 static bool_t
 fw_hook__unknown_protocol_or_xmas(struct sk_buff *skb, __u8 *nf_action__out);
 
+/**
+ * @brief Non-TCP packets are ignored.
+ *        Checks if the packet matches an entry in the connection table, and if
+ *        it does handles it and ACCEPTs it.
+ *        TCP packets that don't match will be ignored.
+ *        Handled only PRE_ROUTING packets.
+ * @see fw_hook_f
+ */
 static bool_t
-fw_hook__existing_connection(struct sk_buff *skb, __u8 *nf_action__out);
+fw_hook__existing_connection_pre_routing(struct sk_buff *skb,
+                                         __u8 *nf_action__out);
 
+/**
+ * @brief Check the packet upon the rule table.
+ *        If it doesn't pass, it will be DROPped.
+ *        If it does pass, it will be ignored and handled by the next hook
+ * @see fw_hook_f
+ */
 static bool_t
-fw_hook__route_table(struct sk_buff *skb, __u8 *nf_action__out);
+fw_hook__rule_table(struct sk_buff *skb, __u8 *nf_action__out);
 
+/**
+ * @brief Non-TCP packets are ignored.
+ *        Creates a new entry in the connections table accordingly to
+ *        the a given TCP-SYN packet, or DROPs it if it's a TCP-non-SYN packet.
+ * @see fw_hook_f
+ */
 static bool_t
 fw_hook__connection_table_add(struct sk_buff *skb, __u8 *nf_action__out);
 
+/** 
+ * @brief Handles and ACCEPT all packets
+ */
 static bool_t
 fw_hook__collector(struct sk_buff *skb, __u8 *nf_action__out);
 
+/** 
+ * @brief Non-TCP packets are ignored.
+ *        Checks if the packet matches an entry in the connection table, and if
+ *        it does handles it and ACCEPTs it.
+ *        TCP packets that don't match will be ignored.
+ *        Handled only LOCAL_OUT packets.
+ */
 static bool_t
-fw_hook__local_out_connection(struct sk_buff *skb, __u8 *nf_action__out);
+fw_hook__existing_connection_local_out(struct sk_buff *skb, __u8 *nf_action__out);
 
+/**
+ * @brief Run a packet through a given fw_hook_f array, by order.
+ *        The first hook that handles the packet determines the return value,
+ *        without calling the next hooks
+ *
+ * @param[in] skb The packet to handle
+ * @param[in] hooks The hooks array
+ * @param[in] hooks_count Length of hooks
+ *
+ * @return Action to do (NF_DROP or NF_ACCEPT)
+ */
 static unsigned int
 hw4secws_run_hooks(struct sk_buff *skb,
                    const fw_hook_f *hooks,
@@ -382,16 +428,16 @@ static const fw_hook_f g_pre_routing_hooks[] = {
     fw_hook__unknown_protocol_or_xmas,
 
     /* Handle TCP-state of an existing connection entry */
-    fw_hook__existing_connection,
+    fw_hook__existing_connection_pre_routing,
 
     /* User-configured route rules for TCP, UDP, ICMP */
-    fw_hook__route_table,
+    fw_hook__rule_table,
 
     /* For TCP SYN packets, add a connection entry */
     fw_hook__connection_table_add,
 
     /* Handle TCP-state of an existing connection entry */
-    fw_hook__existing_connection,
+    fw_hook__existing_connection_pre_routing,
 
     /* Accept all packets */
     fw_hook__collector
@@ -400,7 +446,7 @@ static const fw_hook_f g_pre_routing_hooks[] = {
 /** @brief Hooks chain for LOCAL_OUT packets */
 static const fw_hook_f g_local_out_hooks[] = {
     /* Handle existing connections - spoof the source */
-    fw_hook__local_out_connection,
+    fw_hook__existing_connection_local_out,
 
     /* Accept all packets */
     fw_hook__collector
@@ -445,7 +491,8 @@ fw_hook__unknown_protocol_or_xmas(struct sk_buff *skb, __u8 *nf_action__out)
 }
 
 static bool_t
-fw_hook__existing_connection(struct sk_buff *skb, __u8 *nf_action__out)
+fw_hook__existing_connection_pre_routing(struct sk_buff *skb,
+                                         __u8 *nf_action__out)
 {
     bool_t is_handled = FALSE;
     __u8 action = NF_DROP;
@@ -478,7 +525,7 @@ l_cleanup:
 }
 
 static bool_t
-fw_hook__route_table(struct sk_buff *skb, __u8 *nf_action__out)
+fw_hook__rule_table(struct sk_buff *skb, __u8 *nf_action__out)
 {
     bool_t is_handled = FALSE;
     bool_t does_match_rule_table = FALSE;
@@ -518,7 +565,6 @@ fw_hook__connection_table_add(struct sk_buff *skb, __u8 *nf_action__out)
 {
     bool_t is_handled = FALSE;
     __u8 action = NF_DROP;
-    reason_t reason = REASON_FW_INACTIVE;
 
     if (NET_UTILS_is_syn_packet(skb)) {
         (void)CONNECTION_TABLE_add_by_skb(g_connection_table, skb);
@@ -531,8 +577,6 @@ fw_hook__connection_table_add(struct sk_buff *skb, __u8 *nf_action__out)
     if (is_handled) {
         *nf_action__out = action;
     }
-    /* 3. Log match */
-    (void)FW_LOG_log_match(skb, action, reason);
 
     return is_handled;
 }
@@ -550,7 +594,7 @@ fw_hook__collector(struct sk_buff *skb, __u8 *nf_action__out)
 
 
 static bool_t
-fw_hook__local_out_connection(struct sk_buff *skb, __u8 *nf_action__out)
+fw_hook__existing_connection_local_out(struct sk_buff *skb, __u8 *nf_action__out)
 {
     bool_t is_handled = FALSE;
     __u8 action = NF_DROP;

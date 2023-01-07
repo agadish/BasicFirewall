@@ -19,23 +19,35 @@
 
 
 /*    M A C R O S   */
-#define ROWS_PER_CHUNK (2)
+/** @brief Amount of log rows per log chunk */
+#define ROWS_PER_CHUNK (256)
+
 
 /*    T Y P E D E F S   */
-struct log_dump_context_s {
-    size_t read_index;
-};
-
+/**
+ * @brief A bunch of log rows bounded together as a node in the linked list
+ *
+ * @param node The linked list node
+ * @param rows Array or ROWS_PER_CHUNK log rows
+ * @param write_index How many log rows are currently written to this chunk
+ */
 typedef struct logs_chunk_s {
     struct klist_node node;
     log_row_t rows[ROWS_PER_CHUNK];
     uint8_t write_index;
 } logs_chunk_t;
 
+/**
+ * @brief A list of logs, with quick access to its tail
+ *
+ * @param list The list
+ * @param tail The tail
+ */
 typedef struct logs_list_s {
     struct klist list;
     logs_chunk_t *tail;
 } logs_list_t;
+
 
 /*   G L O B A L S   */
 DEFINE_KLIST(g_log, NULL, NULL);
@@ -43,14 +55,32 @@ static logs_chunk_t *g_log_tail = NULL;
 
 
 /*   F U N C T I O N S   D E C L A R A T I O N S   */
+/**
+ * @brief Allocate a new logs chunk
+ *
+ * @param[out] chunk__out The chunk to create
+ *
+ * @return E__SUCCESS on success
+ */
 static result_t
-create_logs_chunk(logs_chunk_t **chunk_out);
+create_logs_chunk(logs_chunk_t **chunk__out);
 
+/**
+ * @brief Check if there if the logs list tail is full, and if so - allocate
+ *        a new empty chunk and append it to the list as the new tail
+ *
+ * @return E__SUCCESS on success
+ */
 static result_t
-allocate_new_chunk_if_required(void);
+allocate_new_tail_if_required(void);
 
+/**
+ * @brief Allocate a new logs chunk and append it to the list as its new tail
+ *
+ * @return E__SUCCESS on success
+ */
 static result_t
-add_tail(void);
+allocate_new_tail(void);
 
 /**
  * @brief Copy log_row_t's (as much as possible) from a given chunk to a buffer
@@ -70,24 +100,65 @@ dump_from_chunk(logs_chunk_t *chunk,
                 size_t buffer_size,
                 loff_t *offset_to_start_inout);
 
+/**
+ * @brief Get the number bytes occupied by logs in a given chunk
+ * 
+ * @param[in] chunk Chunk to check
+ *
+ * @return Number of occupied bytes
+ */
 static size_t
-get_chunk_size(logs_chunk_t *chunk);
+get_chunk_occupied_bytes(logs_chunk_t *chunk);
 
+/**
+ * @brief Init a new log row accordingly to a given packet
+ *
+ * @param row[in] The log row
+ * @param skb[in] The packet that caused the log
+ */
 static void
 init_log_row(log_row_t *row, const struct sk_buff *skb);
 
+/**
+ * @brief Update the timestamp, action and reason for a given log row
+ *
+ * @param[in] row The row to update
+ * @param[in] action The latest action
+ * @param[in] reacion The latest reason
+ */
 static void
 touch_log_row(log_row_t *row, __u8 action, reason_t reason);
 
+/**
+ * @brief Search for a log entry that matches a given packet
+ *
+ * @param[in] skb The packet to match
+ *
+ * @return The matching log row if found, otherwise NULL
+ */
 static log_row_t *
 search_log_entry(const struct sk_buff *skb);
 
+/**
+ * @brief Check if a given log row matches a packet
+ *
+ * @param[in] row The log row
+ * @param[in] skb The packet
+ *
+ * @return TRUE if matches, otherwise FALSE
+ */
 static bool_t
 does_log_row_match(const log_row_t *row,
                    const struct sk_buff *skb);
 
 /**
- * @brief Seek to the logs_chunk_t accordingly to the offset
+ * @brief Seek to the logs_chunk_t accordingly to the offset (in bytes)
+ *
+ * @param[in] iter Iterator of the chunks
+ * @param[in] offset_inout The desired offset at input, the the offset within
+ *                         the returned entry at the output
+ *
+ * @return The chunk at the given offset
  */
 static logs_chunk_t *
 seek_to_chunk(struct klist_iter *iter, loff_t *offset_inout);
@@ -95,7 +166,7 @@ seek_to_chunk(struct klist_iter *iter, loff_t *offset_inout);
 
 /*   F U N C T I O N S   I M P L E M E N T A T I O N S   */
 static result_t
-create_logs_chunk(logs_chunk_t **chunk_out)
+create_logs_chunk(logs_chunk_t **chunk__out)
 {
     result_t result = E__UNKNOWN;
     logs_chunk_t *chunk = NULL;
@@ -113,7 +184,7 @@ create_logs_chunk(logs_chunk_t **chunk_out)
     INIT_LIST_HEAD(&chunk->node.n_node);
 
     /* Success */
-    *chunk_out = chunk;
+    *chunk__out = chunk;
     result = E__SUCCESS;
 l_cleanup:
     if (E__SUCCESS != result) {
@@ -124,14 +195,14 @@ l_cleanup:
 }
 
 static result_t
-allocate_new_chunk_if_required(void)
+allocate_new_tail_if_required(void)
 {
     result_t result = E__UNKNOWN;
 
     if ((NULL == g_log_tail) ||
         (ROWS_PER_CHUNK <= g_log_tail->write_index))
     {
-        result = add_tail();
+        result = allocate_new_tail();
         if (E__SUCCESS != result) {
             goto l_cleanup;
         }
@@ -149,7 +220,7 @@ FW_LOG_init(void)
 }
 
 static result_t
-add_tail(void)
+allocate_new_tail(void)
 {
     result_t result = E__UNKNOWN;
 
@@ -314,7 +385,7 @@ FW_LOG_log_match(const struct sk_buff *skb,
     if (NULL == dest_row) {
         /* 1. Get a poiner to the matching log_row_t */
         /* 1.1. Make sure we have a free slot at the logs chunk tail */
-        result = allocate_new_chunk_if_required();
+        result = allocate_new_tail_if_required();
         if (E__SUCCESS != result) {
             goto l_cleanup;
         }
@@ -340,10 +411,10 @@ l_cleanup:
 }
 
 static size_t
-get_chunk_size(logs_chunk_t *chunk)
+get_chunk_occupied_bytes(logs_chunk_t *chunk)
 {
-    size_t available_source_bytes = sizeof(log_row_t) * chunk->write_index;
-    return available_source_bytes;
+    size_t used_source_bytes = sizeof(log_row_t) * chunk->write_index;
+    return used_source_bytes;
 }
 
 static size_t
@@ -398,7 +469,7 @@ seek_to_chunk(struct klist_iter *iter, loff_t *offset_inout)
         }
 
         /* 2. Decrease chunk size */
-        current_chunk_size = get_chunk_size(current_chunk);
+        current_chunk_size = get_chunk_occupied_bytes(current_chunk);
         /* 2.1. If offset is less than chunk, this is the destination chunk */
         if (current_chunk_size > (size_t)*offset_inout) {
             result = current_chunk;

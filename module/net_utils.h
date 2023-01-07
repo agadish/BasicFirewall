@@ -19,10 +19,10 @@
 
 
 /*   C O N S T A N T S   */
-
 #define IN_INTERFACE "enp0s8"
 #define OUT_INTERFACE "enp0s9"
 #define DEBUG_INTERFACE "enp0s3"
+
 
 /*   M A C R O S   */
 /**
@@ -41,7 +41,9 @@
 
 /*   F U N C T I O N S   D E C L A R A T I O N S   */
 /**
- * @brief Determine if a packet is a SYN packet
+ * @brief Determine if a packet is a TCP-SYN pack-SYN packet.
+ *        The test (as specificied on the exercise), actually checks if the
+ *        packet doesn't have the ACK flag.
  * 
  * @param[in] tcp_header The TCP header of the packet
  *
@@ -50,9 +52,27 @@
 bool_t
 NET_UTILS_is_syn_packet(const struct sk_buff *skb);
 
+/**
+ * @brief Recalculate the IP checksum and the TCP checksum
+ * 
+ * @param[in] skb Packet to recalcualte it checksums
+ *
+ * @return TRUE if was fixed, FALSE if NULL is given or upon linearization error
+ *
+ * @author https://www.github.com/reuvenpl/checksum
+ *
+ */
 bool_t
-NET_UTILS_fix_checksum(struct sk_buff *skb);
+NET_UTILS_fix_checksums(struct sk_buff *skb);
 
+/**
+ * @brief Get the local IP address of the given network device, or 0 on error.
+ *        The returned address in on big endian
+ *
+ * @param[in] dev The device to get its address
+ *
+ * @return The given IP address, or 0 on error
+ */
 uint32_t
 NET_UTILS_get_local_ip__network_order(struct net_device *dev);
 
