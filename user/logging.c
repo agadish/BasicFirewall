@@ -56,7 +56,7 @@ print_log_row(log_row_t *row)
     uint16_t dst_port = 0;
 
 
-    FORMAT_get_date_string(date, ARRAY_LENGTH(date));
+    FORMAT_get_date_string(date, ARRAY_LENGTH(date), row->timestamp);
     FORMAT_ip_to_str(src_ip, sizeof(src_ip), row->src_ip);
     FORMAT_ip_to_str(dst_ip, sizeof(dst_ip), row->dst_ip);
     src_port = ntohs(row->src_port);

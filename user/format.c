@@ -426,15 +426,14 @@ FORMAT_direction_to_str(direction_t direction)
     return result;
 }
 
-    void
-FORMAT_get_date_string(char *date, size_t buffer_length)
+void
+FORMAT_get_date_string(char *date, size_t buffer_length, unsigned long timestamp)
 {
-    time_t now = 0;
     struct tm *t = NULL;
     int result_strftime = 0;
+    time_t tloc = (time_t)timestamp;
 
-    now = time(NULL);
-    t = localtime(&now);
+    t = localtime(&tloc);
 
     result_strftime = strftime(date, buffer_length - 1, "%d/%m/%Y %H:%M:%S", t);
     if (0 == result_strftime) {

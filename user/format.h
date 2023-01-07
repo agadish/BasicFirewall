@@ -76,7 +76,7 @@ const char *
 FORMAT_direction_to_str(direction_t direction);
 
 void
-FORMAT_get_date_string(char *date, size_t buffer_length);
+FORMAT_get_date_string(char *date, size_t buffer_length, unsigned long timestamp);
 
 void
 FORMAT_state_to_str(char *buffer,
