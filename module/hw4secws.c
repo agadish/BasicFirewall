@@ -548,9 +548,12 @@ fw_hook__rule_table(struct sk_buff *skb, __u8 *nf_action__out)
         is_handled = TRUE;
         action = NF_DROP;
         reason = REASON_NO_MATCHING_RULE;
+    } else if (NF_DROP == action) {
+        /* 3. If it DOES match the rule table and SHOULD BE DROPPED - drop it */
+        is_handled = TRUE;
     }
-    /* 2. If it DOES match the rule table - don't handle the packet! */
 
+    /* XXX: if it does match and should be accepted - don't handle the packet */
     if (is_handled) {
         *nf_action__out = action;
     }
