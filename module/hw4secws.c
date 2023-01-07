@@ -555,8 +555,6 @@ fw_hook__rule_table(struct sk_buff *skb, __u8 *nf_action__out)
         *nf_action__out = action;
     }
     /* 3. Log match */
-    printk(KERN_INFO "%s (skb=%s): logging action %d reason %d\n",
-            __func__, SKB_str(skb), action, reason);
     (void)FW_LOG_log_match(skb, action, reason);
 
     return is_handled;
