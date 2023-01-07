@@ -29,26 +29,26 @@
 #define CONNECTION_ENTRY_init_by_skb(entry, skb) (_ENTRY_VTBL((entry))->init_by_skb((connection_entry_t *)(entry), (skb)))
 #define CONNECTION_ENTRY_init_by_id(entry, id) (_ENTRY_VTBL((entry))->init_by_id((connection_entry_t *)(entry), (id)))
 #define CONNECTION_ENTRY_destroy(entry) (_ENTRY_VTBL((entry))->destroy((connection_entry_t *)(entry)))
-#define CONNECTION_ENTRY_pre_routing_hook(entry, skb, cmp_result) do {          \
+#define CONNECTION_ENTRY_pre_routing_hook(entry, skb, direction) do {           \
     if (NULL != _ENTRY_VTBL((entry))->pre_routing_hook) {                       \
         _ENTRY_VTBL((entry))->pre_routing_hook((connection_entry_t *)(entry),   \
                                                (skb),                           \
-                                               (cmp_result));                   \
+                                               (direction));                    \
     }                                                                           \
 } while (0)
 
-#define CONNECTION_ENTRY_local_out_hook(entry, skb, cmp_result) do {        \
+#define CONNECTION_ENTRY_local_out_hook(entry, skb, direction) do {         \
     if (NULL != _ENTRY_VTBL((entry))->local_out_hook) {                     \
         _ENTRY_VTBL((entry))->local_out_hook((connection_entry_t *)(entry), \
                                                (skb),                       \
-                                               (cmp_result));               \
+                                               (direction));                \
     }                                                                       \
 } while (0)
 
 #define CONNECTION_ENTRY_cmp_pre_routing(entry, skb) (_ENTRY_VTBL((entry))->cmp_pre_routing((connection_entry_t *)(entry), (skb)))
 #define CONNECTION_ENTRY_cmp_local_out(entry, skb) (_ENTRY_VTBL((entry))->cmp_local_out((connection_entry_t *)(entry), (skb)))
 #define CONNECTION_ENTRY_dump(entry, buf, buflen) (_ENTRY_VTBL((entry))->dump((connection_entry_t *)(entry), (buf), (buflen)))
-#define CONNECTION_ENTRY_get_conn_by_cmp(entry, cmp_res, src_out, dst_out) (_ENTRY_VTBL((entry))->get_conn_by_cmp((entry), (cmp_res), (src_out), (dst_out)))
+#define CONNECTION_ENTRY_get_conns_by_direction(entry, direction, src_out, dst_out) (_ENTRY_VTBL((entry))->get_conns_by_direction((entry), (direction), (src_out), (dst_out)))
 #define CONNECTION_ENTRY_is_closed(entry) (_ENTRY_VTBL((entry))->is_closed((connection_entry_t *)(entry)))
 
 #define IS_PROXY_ENTRY(entry) (CONNECTION_TYPE_PROXY == _ENTRY_VTBL((entry))->type)
@@ -79,18 +79,18 @@ typedef void (*entry_destroy_f)(connection_entry_t *entry);
 
 typedef void (*entry_hook_f)(connection_entry_t *conn,
                              struct sk_buff *skb,
-                             packet_direction_t cmp_result);
+                             packet_direction_t direction);
 
 typedef packet_direction_t (*entry_compare_f)(connection_entry_t *conn,
                                               const struct sk_buff *skb);
-typedef bool_t (*get_conn_by_cmp_f)(connection_entry_t *entry,
-                                    packet_direction_t cmp_res,
-                                    single_connection_t **src_out,
-                                    single_connection_t **dst_out);
+typedef bool_t (*get_conns_by_direction_f)(connection_entry_t *entry,
+                                           packet_direction_t direction,
+                                           single_connection_t **src_out,
+                                           single_connection_t **dst_out);
 
 typedef size_t (*dump_entry_f)(const connection_entry_t *entry,
-                             uint8_t *buffer,
-                             size_t buffer_size);
+                               uint8_t *buffer,
+                               size_t buffer_size);
 
 
 typedef bool_t (*entry_is_closed_f)(connection_entry_t *entry);
@@ -109,7 +109,7 @@ typedef struct connection_entry_vtbl_s {
     entry_compare_f cmp_pre_routing;
     entry_compare_f cmp_local_out;
     dump_entry_f dump;
-    get_conn_by_cmp_f get_conn_by_cmp;
+    get_conns_by_direction_f get_conns_by_direction;
 } connection_entry_vtbl_t;
 
 struct connection_entry_s {
@@ -155,11 +155,6 @@ CONN_str(const connection_t *conn);
 
 const char *
 SINGLE_CONN_str(const single_connection_t *conn);
-
-packet_direction_t
-CONNECTION_compare(const connection_t *conn,
-                   const struct sk_buff *skb);
-
 
 #endif /* __CONNECTION_ENTRY_H__ */
 

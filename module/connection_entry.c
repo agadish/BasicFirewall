@@ -112,16 +112,16 @@ dump_proxy_entry(const proxy_connection_entry_t *pentry,
                  size_t buffer_size);
 
 static bool_t
-entry_get_conn_by_cmp(connection_entry_t *entry,
-                      packet_direction_t cmp_res,
-                      single_connection_t **src_out,
-                      single_connection_t **dst_out);
+entry_get_conns_by_direction(connection_entry_t *entry,
+                             packet_direction_t cmp_res,
+                             single_connection_t **src_out,
+                             single_connection_t **dst_out);
 
 static bool_t
-proxy_entry_get_conn_by_cmp(proxy_connection_entry_t *entry,
-                      packet_direction_t cmp_res,
-                      single_connection_t **src_out,
-                      single_connection_t **dst_out);
+proxy_entry_get_conns_by_direction(proxy_connection_entry_t *entry,
+                                   packet_direction_t cmp_res,
+                                   single_connection_t **src_out,
+                                   single_connection_t **dst_out);
 static bool_t
 entry_is_closed(connection_entry_t *entry);
 
@@ -149,7 +149,7 @@ connection_entry_vtbl_t g_vtable_connection_direct = {
     .pre_routing_hook = NULL,
     .local_out_hook = NULL,
     .dump = dump_entry,
-    .get_conn_by_cmp = entry_get_conn_by_cmp,
+    .get_conns_by_direction = entry_get_conns_by_direction,
     .cmp_pre_routing = entry_compare_packet_pre_routing,
     .cmp_local_out = entry_compare_packet_local_out
 };
@@ -164,7 +164,7 @@ connection_entry_vtbl_t g_vtable_connection_proxy = {
     .pre_routing_hook = (entry_hook_f)proxy_entry_pre_routing_hook,
     .local_out_hook = (entry_hook_f)proxy_entry_local_out_hook,
     .dump = (dump_entry_f)dump_proxy_entry,
-    .get_conn_by_cmp = (get_conn_by_cmp_f)proxy_entry_get_conn_by_cmp,
+    .get_conns_by_direction = (get_conns_by_direction_f)proxy_entry_get_conns_by_direction,
     .cmp_pre_routing = (entry_compare_f)proxy_entry_compare_packet_pre_routing,
     .cmp_local_out = (entry_compare_f)proxy_entry_compare_packet_local_out
 };
@@ -864,10 +864,10 @@ l_cleanup:
 }
 
 static bool_t
-entry_get_conn_by_cmp(connection_entry_t *entry,
-                      packet_direction_t cmp_res,
-                      single_connection_t **src_out,
-                      single_connection_t **dst_out)
+entry_get_conns_by_direction(connection_entry_t *entry,
+                             packet_direction_t cmp_res,
+                             single_connection_t **src_out,
+                             single_connection_t **dst_out)
 {
     bool_t is_success = TRUE;
 
@@ -893,10 +893,10 @@ entry_get_conn_by_cmp(connection_entry_t *entry,
 }
 
 static bool_t
-proxy_entry_get_conn_by_cmp(proxy_connection_entry_t *entry,
-                      packet_direction_t cmp_res,
-                      single_connection_t **src_out,
-                      single_connection_t **dst_out)
+proxy_entry_get_conns_by_direction(proxy_connection_entry_t *entry,
+                                   packet_direction_t cmp_res,
+                                   single_connection_t **src_out,
+                                   single_connection_t **dst_out)
 {
     bool_t is_success = TRUE;
 

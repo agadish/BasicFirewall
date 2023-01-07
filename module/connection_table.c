@@ -291,40 +291,8 @@ l_cleanup:
     return is_closed;
 }
 
-bool_t
-CONNECTION_TABLE_track_local_out(connection_table_t *table,
-                                 struct sk_buff *skb)
-{
-    bool_t was_handled = FALSE;
-    connection_entry_t *entry = NULL;
-    packet_direction_t cmp_result = PACKET_DIRECTION_MISMATCH;
-
-    /* 0. Input validation */
-    if ((NULL == table) || (NULL == skb)) {
-        printk(KERN_WARNING "CONNECTION_TABLE_check got invalid input\n");
-        goto l_cleanup;
-    }
-
-    /* 1. Check if exists on the table */
-    /* Note: For SYN packets it won't match, and the handling will be done here...
-     *       Unless, a connection exists for this SYN packet, and it will be handled accordingly */
-    cmp_result = search_entry__local_out(&table->list, skb, &entry);
-    printk(KERN_INFO "%s (skb=%s): search_entry returned %d\n", __func__, SKB_str(skb), cmp_result);
-    if (PACKET_DIRECTION_MISMATCH == cmp_result) {
-        /* printk(KERN_INFO "%s (skb=%s): no entry for 0x%.8x:0x%.4x -> 0x%.8x->0x%.4x\n", __func__, SKB_str(skb), ip_hdr(skb)->saddr, tcp_hdr(skb)->source, ip_hdr(skb)->daddr, tcp_hdr(skb)->dest); */
-        goto l_cleanup;
-    }
-
-    CONNECTION_ENTRY_local_out_hook(entry, skb, cmp_result);
-
-l_cleanup:
-
-    return was_handled;
-}
-
-
 packet_direction_t
-CONNECTION_TABLE_check(connection_table_t *table,
+CONNECTION_TABLE_check_pre_routing(connection_table_t *table,
                        struct sk_buff *skb,
                        __u8 *action_out)
 {
@@ -337,7 +305,7 @@ CONNECTION_TABLE_check(connection_table_t *table,
 
     /* 0. Input validation */
     if ((NULL == table) || (NULL == skb) || (NULL == action_out)) {
-        printk(KERN_WARNING "CONNECTION_TABLE_check got invalid input\n");
+        printk(KERN_WARNING "CONNECTION_TABLE_check_pre_routing got invalid input\n");
         goto l_cleanup;
     }
 
@@ -365,9 +333,9 @@ CONNECTION_TABLE_check(connection_table_t *table,
     }
 
     /* 3. Get sender and receiver */
-    /* printk(KERN_INFO "%s: calling CONNECTION_ENTRY_get_conn_by_cmp=%p...\n", __func__, entry->_vtbl->get_conn_by_cmp); */
-    result_get_conn = CONNECTION_ENTRY_get_conn_by_cmp(entry, cmp_result, &conn_sender, &conn_receiver);
-    /* printk(KERN_INFO "%s: get_conn_by_cmp returned\n", __func__); */
+    /* printk(KERN_INFO "%s: calling CONNECTION_ENTRY_get_conns_by_direction=%p...\n", __func__, entry->_vtbl->get_conns_by_direction); */
+    result_get_conn = CONNECTION_ENTRY_get_conns_by_direction(entry, cmp_result, &conn_sender, &conn_receiver);
+    /* printk(KERN_INFO "%s: get_conns_by_direction returned\n", __func__); */
     if (!result_get_conn) {
         printk(KERN_INFO "%s (skb=%s): invalid get conn\n", __func__, SKB_str(skb));
         remove_entry(entry);
@@ -406,7 +374,7 @@ CONNECTION_TABLE_check_local_out(connection_table_t *table,
 
     /* 0. Input validation */
     if ((NULL == table) || (NULL == skb)) {
-        printk(KERN_WARNING "CONNECTION_TABLE_check got invalid input\n");
+        printk(KERN_WARNING "CONNECTION_TABLE_check_pre_routing got invalid input\n");
         goto l_cleanup;
     }
 
@@ -434,9 +402,9 @@ CONNECTION_TABLE_check_local_out(connection_table_t *table,
     }
 
     /* 3. Get sender and receiver */
-    /* printk(KERN_INFO "%s: calling CONNECTION_ENTRY_get_conn_by_cmp=%p...\n", __func__, entry->_vtbl->get_conn_by_cmp); */
-    result_get_conn = CONNECTION_ENTRY_get_conn_by_cmp(entry, cmp_result, &conn_sender, &conn_receiver);
-    /* printk(KERN_INFO "%s: get_conn_by_cmp returned\n", __func__); */
+    /* printk(KERN_INFO "%s: calling CONNECTION_ENTRY_get_conns_by_direction=%p...\n", __func__, entry->_vtbl->get_conns_by_direction); */
+    result_get_conn = CONNECTION_ENTRY_get_conns_by_direction(entry, cmp_result, &conn_sender, &conn_receiver);
+    /* printk(KERN_INFO "%s: get_conns_by_direction returned\n", __func__); */
     if (!result_get_conn) {
         printk(KERN_INFO "%s (skb=%s): invalid get conn\n", __func__, SKB_str(skb));
         remove_entry(entry);
@@ -465,30 +433,16 @@ l_cleanup:
 }
 
 result_t
-CONNECTION_TABLE_handle_accepted_syn(connection_table_t *table,
-                                     const struct sk_buff *skb)
+CONNECTION_TABLE_add_by_skb(connection_table_t *table,
+                            const struct sk_buff *skb)
 {
     result_t result = E__UNKNOWN;
     connection_entry_t *entry = NULL;
-    struct iphdr *ip_header = NULL;
-    struct tcphdr *tcp_header = NULL;
 
     /* 0. Input validation */
     /* 0.1. NULL validation */
     if ((NULL == table) || (NULL == skb)) {
         result = E__NULL_INPUT;
-        goto l_cleanup;
-    }
-
-    /* 0.2. TCP SYN validation */
-    ip_header = ip_hdr(skb);
-    if (IPPROTO_TCP != ip_header->protocol) {
-        result = E__SUCCESS;
-        goto l_cleanup;
-    }
-    tcp_header = tcp_hdr(skb);
-    if (!NET_UTILS_is_syn_packet(tcp_header)) {
-        result = E__SUCCESS;
         goto l_cleanup;
     }
 
@@ -613,8 +567,8 @@ remove_entry(connection_entry_t *entry)
 
 
 result_t
-CONNECTION_TABLE_drop_entry_by_skb(connection_table_t *table,
-                                   struct sk_buff *skb)
+CONNECTION_TABLE_remove_by_skb(connection_table_t *table,
+                               const struct sk_buff *skb)
 {
     result_t result = E__UNKNOWN;
     packet_direction_t direction = PACKET_DIRECTION_MISMATCH;
@@ -642,8 +596,8 @@ l_cleanup:
 }
 
 result_t
-CONNECTION_TABLE_add_connection(connection_table_t *table,
-                                const connection_id_t *id)
+CONNECTION_TABLE_add_by_id(connection_table_t *table,
+                           const connection_id_t *id)
 {
     result_t result = E__UNKNOWN;
     connection_entry_t *entry = NULL;

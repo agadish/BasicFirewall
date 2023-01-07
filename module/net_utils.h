@@ -33,10 +33,8 @@
 #define NET_UTILS_DOES_ACK_MATCH(tcp_header, rule) (((tcp_header)->ack) ^ \
                                                         (rule)->ack)
 
-#define NET_UTILS_IS_XMAS_TCP_HEADER(tcp_hdr) ((0 != (tcp_hdr)->fin) && \
-                                               (0 != (tcp_hdr)->urg) && \
-                                               (0 != (tcp_hdr)->psh))
 #define NET_UTILS_GET_IP_MASK(n) ((0 == (n)) ? 0 : (~((1 << (32 - (n))) - 1)))
+#define NET_UTILS_is_tcp_packet(skb) ((NULL != (skb)) && (IPPROTO_TCP == ip_hdr((skb))->protocol))
 
 
 /*   F U N C T I O N S   D E C L A R A T I O N S   */
@@ -48,7 +46,7 @@
  * @return TRUE if SYN packet, otherwise FALSE
  */
 bool_t
-NET_UTILS_is_syn_packet(const struct tcphdr *tcp_header);
+NET_UTILS_is_syn_packet(const struct sk_buff *skb);
 
 bool_t
 NET_UTILS_fix_checksum(struct sk_buff *skb);

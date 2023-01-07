@@ -67,33 +67,25 @@ CONNECTION_TABLE_dump_data(const connection_table_t *table,
  *         to action_out parameter
  */
 packet_direction_t
-CONNECTION_TABLE_check(connection_table_t *table,
-                       struct sk_buff *skb,
-                       __u8 *action_out);
+CONNECTION_TABLE_check_pre_routing(connection_table_t *table,
+                                   struct sk_buff *skb,
+                                   __u8 *action_out);
 
 packet_direction_t
 CONNECTION_TABLE_check_local_out(connection_table_t *table,
                        struct sk_buff *skb);
 
 result_t
-CONNECTION_TABLE_assign_proxy(connection_table_t *table,
-                              proxy_connection_t *proxy_conn);
+CONNECTION_TABLE_add_by_skb(connection_table_t *table,
+                            const struct sk_buff *skb);
 
 result_t
-CONNECTION_TABLE_handle_accepted_syn(connection_table_t *table,
-                                     const struct sk_buff *skb);
-
-bool_t
-CONNECTION_TABLE_track_local_out(connection_table_t *table,
-                                 struct sk_buff *skb);
+CONNECTION_TABLE_remove_by_skb(connection_table_t *table,
+                               const struct sk_buff *skb);
 
 result_t
-CONNECTION_TABLE_drop_entry_by_skb(connection_table_t *table,
-                                   struct sk_buff *skb);
-
-result_t
-CONNECTION_TABLE_add_connection(connection_table_t *table,
-                                const connection_id_t *id);
+CONNECTION_TABLE_add_by_id(connection_table_t *table,
+                           const connection_id_t *id);
 
 
 

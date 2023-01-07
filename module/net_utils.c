@@ -22,6 +22,9 @@
 
 /*   M A C R O S   */
 #define LO_INTERFACE "lo"
+#define NET_UTILS_IS_XMAS_TCP_HEADER(tcp_hdr) ((0 != (tcp_hdr)->fin) && \
+                                               (0 != (tcp_hdr)->urg) && \
+                                               (0 != (tcp_hdr)->psh))
 
 
 /*   F U N C T I O N S    I M P L E M E N T A T I O N S   */
@@ -103,12 +106,13 @@ l_cleanup:
 }
 
 bool_t
-NET_UTILS_is_syn_packet(const struct tcphdr *tcp_header)
+NET_UTILS_is_syn_packet(const struct sk_buff *skb)
 {
     bool_t is_syn_packet = FALSE;
 
-    if (NULL != tcp_header) {
-        is_syn_packet = (0 == tcp_header->ack) ? TRUE : FALSE;
+    if (NET_UTILS_is_tcp_packet(skb) &&
+        (0 == tcp_hdr(skb)->ack)) {
+        is_syn_packet = TRUE;
     }
 
     return is_syn_packet;

@@ -57,7 +57,8 @@ MODULE_LICENSE("GPL");
  *                            NF_DROP), that is returned iff the hook decides
  *                            to handle the packet
  *
- * @return TRUE if the hook handled the packet, FALSE if it didn't handle the packet
+ * @return TRUE if the hook handled the packet, FALSE if it didn't handle the
+ *         packet
  */
 typedef bool_t (*fw_hook_f)(struct sk_buff *skb, __u8 *nf_action__out);
 
@@ -101,7 +102,7 @@ fw_hook__unknown_protocol_or_xmas(struct sk_buff *skb, __u8 *nf_action__out);
  * @return NF_ACCEPT
  */
 static unsigned int
-hw4secws_hookfn_pre_routing(void *priv,
+hw4secws_nf_hook_pre_routing(void *priv,
                             struct sk_buff *skb,
                             const struct nf_hook_state *state);
 
@@ -115,7 +116,7 @@ hw4secws_hookfn_pre_routing(void *priv,
  * @return NF_ACCEPT
  */
 static unsigned int
-hw4secws_hookfn_local_out(void *priv,
+hw4secws_nf_hook_local_out(void *priv,
                           struct sk_buff *skb,
                           const struct nf_hook_state *state);
 
@@ -227,21 +228,10 @@ conns_display(struct device *dev, struct device_attribute *attr, char *buf);
  * @return Number of bytes were written, or negative value on error
  */
 static ssize_t
-conns_modify(struct device *dev, struct device_attribute *attr, const char *buf, size_t count);
-
-/**
- * @brief Handles a write request that creates a new proxy rule
- *
- * @param[in] dev Ignored
- * @param[in] attr Ignored
- * @param[in] buf The buffer that holds the new rules
- * @param[in] count Length of buf
- *
- * @return Number of bytes were read, or negative value on error
- */
-/* static ssize_t */
-/* proxy_conns_assign(struct device *dev, struct device_attribute *attr, const char *buf, size_t count); */
-
+conns_modify(struct device *dev,
+             struct device_attribute *attr,
+             const char *buf,
+             size_t count);
 
 /**
  * @brief Handles a write request that modifies the rules
@@ -254,7 +244,10 @@ conns_modify(struct device *dev, struct device_attribute *attr, const char *buf,
  * @return Number of bytes were read, or negative value on error
  */
 static ssize_t
-rules_modify(struct device *dev, struct device_attribute *attr, const char *buf, size_t count);
+rules_modify(struct device *dev,
+             struct device_attribute *attr,
+             const char *buf,
+             size_t count);
 
 /**
  * @brief Handles a write that requests to zero the logs file
@@ -267,7 +260,10 @@ rules_modify(struct device *dev, struct device_attribute *attr, const char *buf,
  * @return Number of bytes were read, or negative value on error
  */
 static ssize_t
-log_modify(struct device *dev, struct device_attribute *attr, const char *buf, size_t count);
+log_modify(struct device *dev,
+           struct device_attribute *attr,
+           const char *buf,
+           size_t count);
 
 /**
  * @brief Read logs from the firewall's logs module to the userspace.
@@ -309,18 +305,41 @@ fw_log_open(struct inode *fw_log_inode, struct file *fw_log_file);
 static int
 fw_log_release(struct inode *fw_log_inode, struct file *fw_log_file);
 
+static bool_t
+fw_hook__unknown_protocol_or_xmas(struct sk_buff *skb, __u8 *nf_action__out);
+
+static bool_t
+fw_hook__existing_connection(struct sk_buff *skb, __u8 *nf_action__out);
+
+static bool_t
+fw_hook__route_table(struct sk_buff *skb, __u8 *nf_action__out);
+
+static bool_t
+fw_hook__connection_table_add(struct sk_buff *skb, __u8 *nf_action__out);
+
+static bool_t
+fw_hook__collector(struct sk_buff *skb, __u8 *nf_action__out);
+
+static bool_t
+fw_hook__local_out_connection(struct sk_buff *skb, __u8 *nf_action__out);
+
+static unsigned int
+hw4secws_run_hooks(struct sk_buff *skb,
+                   const fw_hook_f *hooks,
+                   size_t hooks_count);
+
 
 /*   G L O B A L S   */
 /** 
  * @brief Netfilter hook for PRE_ROUTING packet chain,
  */
-static struct nf_hook_ops g_pre_routing_hook;
+static struct nf_hook_ops g_pre_routing_nf_hook;
 
 /** 
  * @brief Netfilter hook for LOCAL_OUT packet chain,
  *        machine nor sent by this machine
  */
-static struct nf_hook_ops g_local_out_hook;
+static struct nf_hook_ops g_local_out_nf_hook;
 
 /** 
  * @brief Character device of the module
@@ -356,6 +375,37 @@ static struct cdev g_cdev_logs;
 static rule_table_t g_rule_table;
 static connection_table_t *g_connection_table = NULL;
 
+/** Hooks chains definitions */
+/** @brief Hooks chain for PRE_ROUTING packets */
+static const fw_hook_f g_pre_routing_hooks[] = {
+    /* Accept non-TCP/UDP/ICMP packets, drop XMAS packets */
+    fw_hook__unknown_protocol_or_xmas,
+
+    /* Handle TCP-state of an existing connection entry */
+    fw_hook__existing_connection,
+
+    /* User-configured route rules for TCP, UDP, ICMP */
+    fw_hook__route_table,
+
+    /* For TCP SYN packets, add a connection entry */
+    fw_hook__connection_table_add,
+
+    /* Handle TCP-state of an existing connection entry */
+    fw_hook__existing_connection,
+
+    /* Accept all packets */
+    fw_hook__collector
+};
+
+/** @brief Hooks chain for LOCAL_OUT packets */
+static const fw_hook_f g_local_out_hooks[] = {
+    /* Handle existing connections - spoof the source */
+    fw_hook__local_out_connection,
+
+    /* Accept all packets */
+    fw_hook__collector
+};
+
 /**
  * @brief The sysfs files
  */
@@ -365,23 +415,7 @@ static DEVICE_ATTR(rules, S_IRUGO | S_IWUSR, rules_display, rules_modify);
 static DEVICE_ATTR(reset, S_IWUSR, NULL, log_modify); 
 /* connecion table file */
 static DEVICE_ATTR(conns, S_IRUGO | S_IWUSR, conns_display, conns_modify); 
-/* proxy connecion table file */
-/* static DEVICE_ATTR(proxy_conns, S_IWUSR | S_IRUGO, NULL, proxy_conns_assign);  */
 
-static bool_t
-fw_hook__unknown_protocol_or_xmas(struct sk_buff *skb, __u8 *nf_action__out);
-
-static bool_t
-fw_hook__existing_connection(struct sk_buff *skb, __u8 *nf_action__out);
-
-static bool_t
-fw_hook__route_table(struct sk_buff *skb, __u8 *nf_action__out);
-
-static bool_t
-fw_hook__connection_table_add(struct sk_buff *skb, __u8 *nf_action__out);
-
-static bool_t
-fw_hook__collector(struct sk_buff *skb, __u8 *nf_action__out);
 
 
 /*   F U N C T I O N S    I M P L E M E N T A T I O N S   */
@@ -419,7 +453,7 @@ fw_hook__existing_connection(struct sk_buff *skb, __u8 *nf_action__out)
 
     printk(KERN_INFO "%s (skb=%s): enter\n", __func__, SKB_str(skb));
     /* 1. Handle only TCP packets */
-    if (IPPROTO_TCP != ip_hdr(skb)->protocol) {
+    if (!NET_UTILS_is_tcp_packet(skb)) {
         printk(KERN_INFO "%s: ignoring non-TCP packet (%d)\n", __func__,
                ip_hdr(skb)->protocol);
         is_handled = FALSE;
@@ -429,7 +463,7 @@ fw_hook__existing_connection(struct sk_buff *skb, __u8 *nf_action__out)
     /* 2. Do the handling and get the packet direction.
      *    Any non-PACKET_DIRECTION_MISMATCH return value means that the
      *    connection exists in the table and the packet was handled */
-    conns_match = CONNECTION_TABLE_check(g_connection_table, skb, &action);
+    conns_match = CONNECTION_TABLE_check_pre_routing(g_connection_table, skb, &action);
     if (PACKET_DIRECTION_MISMATCH != conns_match) {
         is_handled = TRUE;
         action = NF_ACCEPT;
@@ -460,7 +494,10 @@ fw_hook__route_table(struct sk_buff *skb, __u8 *nf_action__out)
      *    to the next hook in the array.
      *    If the rule table doesn't allow the packet, handle it by dropping it.
      */
-    does_match_rule_table = RULE_TABLE_check(&g_rule_table, skb, &action, &reason);
+    does_match_rule_table = RULE_TABLE_check(&g_rule_table,
+                                             skb,
+                                             &action,
+                                             &reason);
     if (!does_match_rule_table) {
         /* 2. If it doesn't match the rule table - handle the packet by dropping it */
         is_handled = TRUE;
@@ -486,22 +523,14 @@ fw_hook__connection_table_add(struct sk_buff *skb, __u8 *nf_action__out)
     reason_t reason = REASON_FW_INACTIVE;
     printk(KERN_INFO "%s (skb=%s): enter\n", __func__, SKB_str(skb));
 
-    if (IPPROTO_TCP == ip_hdr(skb)->protocol) {
-        /* For sure it has syn */
-        if ((tcp_hdr(skb)->syn) &&
-            (!tcp_hdr(skb)->ack) &&
-            (!tcp_hdr(skb)->rst) &&
-            (!tcp_hdr(skb)->fin)) {
-            /* Ignore failure */
-            printk(KERN_INFO "%s: handling accepted syn\n", __func__);
-            (void)CONNECTION_TABLE_handle_accepted_syn(g_connection_table, skb);
-        } else {
-            is_handled = TRUE;
-            action = NF_DROP;
-            (void)CONNECTION_TABLE_drop_entry_by_skb(g_connection_table, skb);
-            printk(KERN_ERR "%s (skb=%s): first packet is not syn\n", __func__,
-                   SKB_str(skb));
-        }
+    if (NET_UTILS_is_syn_packet(skb)) {
+        (void)CONNECTION_TABLE_add_by_skb(g_connection_table, skb);
+    } else if (NET_UTILS_is_tcp_packet(skb)) {
+        is_handled = TRUE;
+        action = NF_DROP;
+        (void)CONNECTION_TABLE_remove_by_skb(g_connection_table, skb);
+        printk(KERN_ERR "%s (skb=%s): first packet is not syn\n", __func__,
+               SKB_str(skb));
     } else {
         printk(KERN_INFO "%s: skipping non-tcp packet\n", __func__);
     }
@@ -537,7 +566,7 @@ fw_hook__local_out_connection(struct sk_buff *skb, __u8 *nf_action__out)
 
     printk(KERN_INFO "%s (skb=%s): enter\n", __func__, SKB_str(skb));
     /* 1. Handle only TCP packets */
-    if (IPPROTO_TCP != ip_hdr(skb)->protocol) {
+    if (!NET_UTILS_is_tcp_packet(skb)) {
         printk(KERN_INFO "%s: ignoring non-TCP packet (%d)\n", __func__,
                ip_hdr(skb)->protocol);
         is_handled = FALSE;
@@ -592,27 +621,34 @@ fw_log_release(struct inode *fw_log_inode, struct file *fw_log_file)
 }
 
 static unsigned int
-hw4secws_hookfn_local_out(void *priv,
-                          struct sk_buff *skb,
-                          const struct nf_hook_state *state)
+hw4secws_run_hooks(struct sk_buff *skb,
+                   const fw_hook_f *hooks,
+                   size_t hooks_count)
 {
     __u8 action = NF_DROP;
     bool_t is_handled = FALSE;
-    fw_hook_f local_out_hooks[] = {
-        /* Handle existing connections - spoof the source */
-        fw_hook__local_out_connection,
-
-        /* Accept all packets */
-        fw_hook__collector
-    };
     size_t i = 0;
 
-    for (i = 0 ; i < ARRAY_LENGTH(local_out_hooks) ; ++i) {
-        is_handled = local_out_hooks[i](skb, &action);
+    for (i = 0 ; i < hooks_count ; ++i) {
+        is_handled = hooks[i](skb, &action);
         if (is_handled) {
             break;
         }
     }
+
+    return (unsigned int)action;
+}
+
+static unsigned int
+hw4secws_nf_hook_local_out(void *priv,
+                          struct sk_buff *skb,
+                          const struct nf_hook_state *state)
+{
+    __u8 action = NF_DROP;
+
+    action = hw4secws_run_hooks(skb,
+                                g_local_out_hooks,
+                                ARRAY_LENGTH(g_local_out_hooks));
 
     printk(KERN_INFO "%s (skb=%s): action %d\n", __func__, SKB_str(skb), action);
 
@@ -620,39 +656,15 @@ hw4secws_hookfn_local_out(void *priv,
 }
 
 static unsigned int
-hw4secws_hookfn_pre_routing(void *priv,
+hw4secws_nf_hook_pre_routing(void *priv,
                             struct sk_buff *skb,
                             const struct nf_hook_state *state)
 {
     __u8 action = NF_DROP;
-    bool_t is_handled = FALSE;
-    fw_hook_f pre_routing_hooks[] = {
-        /* Accept non-TCP/UDP/ICMP packets, drop XMAS packets */
-        fw_hook__unknown_protocol_or_xmas,
 
-        /* Handle TCP-state of an existing connection entry */
-        fw_hook__existing_connection,
-
-        /* User-configured route rules for TCP, UDP, ICMP */
-        fw_hook__route_table,
-
-        /* For TCP SYN packets, add a connection entry */
-        fw_hook__connection_table_add,
-
-        /* Handle TCP-state of an existing connection entry */
-        fw_hook__existing_connection,
-
-        /* Accept all packets */
-        fw_hook__collector
-    };
-    size_t i = 0;
-
-    for (i = 0 ; i < ARRAY_LENGTH(pre_routing_hooks) ; ++i) {
-        is_handled = pre_routing_hooks[i](skb, &action);
-        if (is_handled) {
-            break;
-        }
-    }
+    action = hw4secws_run_hooks(skb,
+                                g_pre_routing_hooks,
+                                ARRAY_LENGTH(g_pre_routing_hooks));
 
     printk(KERN_INFO "%s (skb=%s): action %d\n", __func__, SKB_str(skb), action);
 
@@ -667,13 +679,14 @@ register_hooks(void)
 
     /* 1. Register pre-routing hook */
     /* 1.1. Init struct fields */
-    g_pre_routing_hook.hook = hw4secws_hookfn_pre_routing;
-    g_pre_routing_hook.hooknum = NF_INET_PRE_ROUTING;
-    g_pre_routing_hook.pf = PF_INET;
-    g_pre_routing_hook.priority = NF_IP_PRI_FIRST;
+    g_pre_routing_nf_hook.hook = hw4secws_nf_hook_pre_routing;
+    g_pre_routing_nf_hook.hooknum = NF_INET_PRE_ROUTING;
+    g_pre_routing_nf_hook.pf = PF_INET;
+    g_pre_routing_nf_hook.priority = NF_IP_PRI_FIRST;
 
     /* 1.2. Register hook */
-    result_register_hook = nf_register_net_hook(&init_net, &g_pre_routing_hook);
+    result_register_hook = nf_register_net_hook(&init_net,
+                                                &g_pre_routing_nf_hook);
     if (0 != result_register_hook) {
         result = result_register_hook;
         goto l_cleanup;
@@ -681,13 +694,14 @@ register_hooks(void)
 
     /* 2. Register local-out hook */
     /* 2.1. Init struct fields */
-    g_local_out_hook.hook = hw4secws_hookfn_local_out;
-    g_local_out_hook.hooknum = NF_INET_LOCAL_OUT;
-    g_local_out_hook.pf = PF_INET;
-    g_local_out_hook.priority = NF_IP_PRI_FIRST;
+    g_local_out_nf_hook.hook = hw4secws_nf_hook_local_out;
+    g_local_out_nf_hook.hooknum = NF_INET_LOCAL_OUT;
+    g_local_out_nf_hook.pf = PF_INET;
+    g_local_out_nf_hook.priority = NF_IP_PRI_FIRST;
 
     /* 2.2. Register hook */
-    result_register_hook = nf_register_net_hook(&init_net, &g_local_out_hook);
+    result_register_hook = nf_register_net_hook(&init_net,
+                                                &g_local_out_nf_hook);
     if (0 != result_register_hook) {
         result = result_register_hook;
         goto l_cleanup;
@@ -713,7 +727,10 @@ init_log_driver(void)
     /* 1. Create character devices */
     /* 1.1. Allocate number */
     g_log_dev_number = INVALID_DEV_T_NUMBER;
-    result_alloc_chrdev_region = alloc_chrdev_region(&g_log_dev_number, 0, 1, LOG_CHAR_DEVICE_NAME);
+    result_alloc_chrdev_region = alloc_chrdev_region(&g_log_dev_number,
+                                                     0,
+                                                     1,
+                                                     LOG_CHAR_DEVICE_NAME);
     if (0 > result_alloc_chrdev_region) {
         printk(KERN_ERR "register_chrdev failed for %s: %d\n",
                LOG_CHAR_DEVICE_NAME,
@@ -733,7 +750,11 @@ init_log_driver(void)
     }
 
     /* 2. Create sysfs rules device */
-    g_sysfs_log_device = device_create(g_hw4secws_class, NULL, g_log_dev_number, NULL, SYSFS_LOG_DEVICE_NAME);
+    g_sysfs_log_device = device_create(g_hw4secws_class,
+                                       NULL,
+                                       g_log_dev_number,
+                                       NULL,
+                                       SYSFS_LOG_DEVICE_NAME);
     if (IS_ERR(g_hw4secws_class)) {
         result = -1;
         goto l_cleanup;
@@ -770,7 +791,9 @@ init_rules_driver(void)
     int result_device_create_file = -1;
 
     /* 1. Create character devices */
-    g_rules_dev_number = register_chrdev(0, RULES_CHAR_DEVICE_NAME, &g_fw_rules_fops);
+    g_rules_dev_number = register_chrdev(0,
+                                         RULES_CHAR_DEVICE_NAME,
+                                         &g_fw_rules_fops);
     if (0 > g_rules_dev_number) {
         printk(KERN_ERR "register_chrdev failed for %s\n", RULES_CHAR_DEVICE_NAME);
         result = -1;
@@ -816,7 +839,9 @@ init_conns_driver(void)
     int result_device_create_file = -1;
 
     /* 1. Create character devices */
-    g_conns_dev_number = register_chrdev(0, CONNS_CHAR_DEVICE_NAME, &g_fw_conns_fops);
+    g_conns_dev_number = register_chrdev(0,
+                                         CONNS_CHAR_DEVICE_NAME,
+                                         &g_fw_conns_fops);
     if (0 > g_conns_dev_number) {
         printk(KERN_ERR "register_chrdev failed for %s\n", CONNS_CHAR_DEVICE_NAME);
         result = -1;
@@ -909,7 +934,10 @@ static void
 clean_log_driver(void)
 {
     if (NULL != g_sysfs_log_device) {
-        device_remove_file(g_sysfs_log_device, (const struct device_attribute *)&dev_attr_reset.attr);
+        device_remove_file(
+            g_sysfs_log_device,
+            (const struct device_attribute *)&dev_attr_reset.attr
+        );
         g_sysfs_log_device = NULL;
     }
 
@@ -931,7 +959,10 @@ static void
 clean_rules_driver(void)
 {
     if (NULL != g_sysfs_rules_device) {
-        device_remove_file(g_sysfs_rules_device, (const struct device_attribute *)&dev_attr_rules.attr);
+        device_remove_file(
+            g_sysfs_rules_device,
+            (const struct device_attribute *)&dev_attr_rules.attr
+        );
         g_sysfs_rules_device = NULL;
     }
 
@@ -949,14 +980,11 @@ clean_rules_driver(void)
 static void
 clean_conns_driver(void)
 {
-    /* if (NULL != g_sysfs_proxy_conns_device) { */
-    /*     device_remove_file(g_sysfs_proxy_conns_device, */
-    /*                        (const struct device_attribute *)&dev_attr_conns.attr); */
-    /*     g_sysfs_proxy_conns_device = NULL; */
-    /* } */
-
     if (NULL != g_sysfs_conns_device) {
-        device_remove_file(g_sysfs_conns_device, (const struct device_attribute *)&dev_attr_conns.attr);
+        device_remove_file(
+            g_sysfs_conns_device,
+            (const struct device_attribute *)&dev_attr_conns.attr
+        );
         g_sysfs_conns_device = NULL;
     }
 
@@ -993,8 +1021,8 @@ clean_drivers(void)
 static void
 unregister_hooks(void)
 {
-    nf_unregister_net_hook(&init_net, &g_pre_routing_hook);
-    nf_unregister_net_hook(&init_net, &g_local_out_hook);
+    nf_unregister_net_hook(&init_net, &g_pre_routing_nf_hook);
+    nf_unregister_net_hook(&init_net, &g_local_out_nf_hook);
 }
 
 
@@ -1030,7 +1058,9 @@ conns_display(struct device *dev, struct device_attribute *attr, char *buf)
     UNUSED_ARG(dev);
     UNUSED_ARG(attr);
 
-    was_modified = CONNECTION_TABLE_dump_data(g_connection_table, buf, &buffer_length);
+    was_modified = CONNECTION_TABLE_dump_data(g_connection_table,
+                                              buf,
+                                              &buffer_length);
     if (FALSE == was_modified) {
         result = -1;
         goto l_cleanup;
@@ -1043,7 +1073,10 @@ l_cleanup:
 }
 
 static ssize_t
-conns_modify(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+conns_modify(struct device *dev,
+             struct device_attribute *attr,
+             const char *buf,
+             size_t count)
 {
     ssize_t result = 0;
     result_t add_result = E__UNKNOWN;
@@ -1057,7 +1090,7 @@ conns_modify(struct device *dev, struct device_attribute *attr, const char *buf,
     id = (connection_id_t *)buf;
 
     /* 2. Check if size matches */
-    add_result = CONNECTION_TABLE_add_connection(g_connection_table, id);
+    add_result = CONNECTION_TABLE_add_by_id(g_connection_table, id);
     if (E__SUCCESS != add_result) {
         result = 0;
         goto l_cleanup;
@@ -1072,7 +1105,10 @@ l_cleanup:
 }
 
 static ssize_t
-rules_modify(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+rules_modify(struct device *dev,
+             struct device_attribute *attr,
+             const char *buf,
+             size_t count)
 {
     ssize_t result = 0;
     bool_t was_modified = FALSE;
@@ -1085,37 +1121,11 @@ rules_modify(struct device *dev, struct device_attribute *attr, const char *buf,
     return result;
 }
 
-/* static ssize_t */
-/* proxy_conns_assign(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) */
-/* { */
-/*     ssize_t result = 0; */
-/*     proxy_biconnection_t proxy_conn = {0}; */
-/*     unsigned long result_copy_from_user = 0; */
-/*  */
-/*     if (sizeof(proxy_conn) > count) { */
-/*         goto l_cleanup; */
-/*     } */
-/*  */
-/*     [> 1. Copy proxy details <] */
-/*     result_copy_from_user = copy_from_user(&proxy_conn, buf, count); */
-/*     if (0 != result_copy_from_user) { */
-/*         printk(KERN_ERR "%s: could not copy %d bytes from user\n", __func__, sizeof(proxy_conn)); */
-/*         result = -EINVAL; */
-/*         goto l_cleanup; */
-/*     } */
-/*  */
-/*     if ('0' == buf[0]) { */
-/*         FW_LOG_reset_logs(); */
-/*         result = count; */
-/*     } */
-/*  */
-/* l_cleanup: */
-/*  */
-/*     return result; */
-/* } */
-
 static ssize_t
-log_modify(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+log_modify(struct device *dev,
+           struct device_attribute *attr,
+           const char *buf,
+           size_t count)
 {
     ssize_t result = 0;
 
