@@ -23,7 +23,8 @@
 
 /*   M A C R O S   */
 #define IS_SCONN_CLOSED(sconn) (TCP_CLOSE == (sconn).state)
-#define CONNECTION_IS_CLOSED(conn) (IS_SCONN_CLOSED((conn)->opener) && IS_SCONN_CLOSED((conn)->listener))
+#define CONNECTION_IS_CLOSED(conn) (IS_SCONN_CLOSED((conn)->opener) && \
+                                    IS_SCONN_CLOSED((conn)->listener))
 
 
 /*   F U N C T I O N S   D E C L A R A T I O N S   */
