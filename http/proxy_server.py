@@ -34,6 +34,7 @@ class Reactor(object):
                 self._read_handlers[r_fd]()
             except Exception as e:
                 print('Error: reactor handler failed: %s' % (e, ))
+                raise
 
 
 class ConnectionEntry(object):
@@ -94,6 +95,7 @@ class ConnectionEntry(object):
 class ClientHandler(object):
     def __init__(self, connection_entry):
         self._entry = connection_entry
+        self.is_closed = False
 
     @property
     def client_socket(self):
@@ -119,9 +121,11 @@ class ClientHandler(object):
         raise NotImplementedError()
 
     def close(self):
-        self.unregister_from_reactor()
-        self.client_socket.close()
-        self.server_socket.close()
+        if not self.is_closed:
+            self.unregister_from_reactor()
+            self.client_socket.close()
+            self.server_socket.close()
+        self.is_closed = True
 
     def __del_(self):
         print('ClientHandler bye')
@@ -193,6 +197,7 @@ class ProxyServer(object):
                 self._reactor.run_epoch()
             except Exception as e:
                 print('error %s' % (e, ))
+                raise
 
     def create_client_handler(self, entry):
         raise NotImplementedError()
