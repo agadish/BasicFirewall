@@ -22,6 +22,8 @@
 #define HTTP_USER_PORT_N (htons(800))
 #define FTP_PORT_N (htons(21))
 #define FTP_USER_PORT_N (htons(210))
+#define SMTP_PORT_N (htons(25))
+#define SMTP_USER_PORT_N (htons(250))
 
 
 /*   M A C R O S   */

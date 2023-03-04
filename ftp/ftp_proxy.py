@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
 import urllib.parse
-import proxy_server
+import sys
+sys.path.append('..')
+import proxy.proxy_server
 import re
 import socket
 import struct
@@ -10,11 +12,11 @@ FTP_PROXY_PORT = 210
 
 PORT_REQUEST_FORMAT = b'^PORT ([0-9]+),([0-9]+),([0-9]+),([0-9]+),([0-9]+),([0-9]+)'
 PORT_REQUEST_REGEX = re.compile(PORT_REQUEST_FORMAT)
-CONNECTION_WRITE_PATH = proxy_server.CONNECTION_READ_PATH # '/sys/class/fw/conns/conns'
+CONNECTION_WRITE_PATH = proxy.proxy_server.CONNECTION_READ_PATH # '/sys/class/fw/conns/conns'
 FTP_FILE_PORT = 20
 
 
-class FTPClientHandler(proxy_server.ClientHandler):
+class FTPClientHandler(proxy.proxy_server.ClientHandler):
     def _register_entry(self, entry_raw):
         with open(CONNECTION_WRITE_PATH, 'wb') as f:
             f.write(entry_raw)
@@ -55,7 +57,7 @@ class FTPClientHandler(proxy_server.ClientHandler):
         # XXX: We assume no fragmentation
         self.client_socket.send(data)
 
-class FTPProxy(proxy_server.ProxyServer):
+class FTPProxy(proxy.proxy_server.ProxyServer):
     def __init__(self, listen_port=FTP_PROXY_PORT):
         super(FTPProxy, self).__init__(listen_port)
 

@@ -414,7 +414,6 @@ static struct class *g_hw4secws_class = NULL;
 static struct device *g_sysfs_log_device = NULL;
 static struct device *g_sysfs_rules_device = NULL;
 static struct device *g_sysfs_conns_device = NULL;
-/* static struct device *g_sysfs_proxy_conns_device = NULL; */
 static bool_t g_has_sysfs_rules_device = FALSE;
 static bool_t g_has_sysfs_log_device = FALSE;
 static bool_t g_has_sysfs_conns_device = FALSE;
@@ -912,16 +911,6 @@ init_conns_driver(void)
         result = -1;
         goto l_cleanup;
     }
-
-    /* [> 3.1. Proxy conns - write <] */
-    /* result_device_create_file = device_create_file( */
-    /*     g_sysfs_proxy_conns_device, */
-    /*     (const struct device_attribute *)&dev_attr_proxy_conns.attr */
-    /* ); */
-    /* if (0 != result_device_create_file) { */
-    /*     result = -1; */
-    /*     goto l_cleanup; */
-    /* } */
 
     result = 0;
 l_cleanup:

@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 
 import http
-import proxy_server
+import sys
+sys.path.append('..')
+import proxy.proxy_server
+import proxy.dlp
 from email.parser import BytesParser
 import re
 import urllib.parse
@@ -18,7 +21,7 @@ def checkAjaxInput(ajax_input: str) -> bool:
         return True
 
 
-class HTTPClientHandler(proxy_server.ClientHandler):
+class HTTPClientHandler(proxy.proxy_server.ClientHandler):
     def __init__(self, *args, **kwargs):
         super(HTTPClientHandler, self).__init__(*args, **kwargs)
         self.request = b''
@@ -31,7 +34,7 @@ class HTTPClientHandler(proxy_server.ClientHandler):
             self.close()
             return
         self.request += current_data
-        if self.is_bad_request():
+        if self.is_bad_request() or proxy.dlp.is_bad_request(self.request.decode('utf-8')):
             self.close()
         else:
             self.server_socket.sendall(current_data)
@@ -49,7 +52,12 @@ class HTTPClientHandler(proxy_server.ClientHandler):
             self.client_socket.sendall(current_data)
 
     def is_bad_request(self):
-        request_line, headers_alone = self.request.split(b'\r\n', 1)
+        print(self.request)
+        print(type(self.request))
+        try:
+            request_line, headers_alone = self.request.split(b'\r\n', 1)
+        except Exception as e:
+            return False
 
         method, url_raw, http_version = request_line.split()
         url_parsed = urllib.parse.urlparse(url_raw)
@@ -103,7 +111,7 @@ class HTTPClientHandler(proxy_server.ClientHandler):
         return False
 
 
-class HTTPProxy(proxy_server.ProxyServer):
+class HTTPProxy(proxy.proxy_server.ProxyServer):
     def __init__(self, listen_port=HTTP_PROXY_PORT):
         super(HTTPProxy, self).__init__(listen_port)
 

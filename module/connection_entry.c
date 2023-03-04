@@ -197,7 +197,7 @@ entry_create(connection_entry_t **entry_out)
     }
     (void)memset(entry->conn, 0, sizeof(*entry->conn));
 
-    /* 3. Assign vable */
+    /* 3. Assign vtable */
     entry->_vtbl = &g_vtable_connection_direct;
 
     /* Success */
@@ -251,7 +251,7 @@ proxy_entry_create(proxy_connection_entry_t **pentry_out)
     }
     (void)memset(pentry->server_conn, 0, sizeof(*pentry->server_conn));
 
-    /* 3. Assign vable */
+    /* 3. Assign vtable */
     pentry->_vtbl = &g_vtable_connection_proxy;
 
     /* Success */
@@ -339,6 +339,10 @@ proxy_init_proxy_ports(proxy_connection_entry_t *entry,
             break;
         case FTP_PORT_N:
             entry->client_conn->proxy_port = FTP_USER_PORT_N;
+            entry->server_conn->proxy_port = 0; /* Will be set later */
+            break;
+        case SMTP_PORT_N:
+            entry->client_conn->proxy_port = SMTP_USER_PORT_N;
             entry->server_conn->proxy_port = 0; /* Will be set later */
             break;
         default:
@@ -599,6 +603,7 @@ CONNECTION_ENTRY_create_from_skb(connection_entry_t **entry_out,
     {
         case HTTP_PORT_N:
         case FTP_PORT_N:
+        case SMTP_PORT_N:
             vtable = &g_vtable_connection_proxy;
             break;
         default:
@@ -650,6 +655,7 @@ CONNECTION_ENTRY_create_from_id(connection_entry_t **entry_out,
     {
         case HTTP_PORT_N:
         case FTP_PORT_N:
+        case SMTP_PORT_N:
             vtable = &g_vtable_connection_proxy;
             break;
         default:
