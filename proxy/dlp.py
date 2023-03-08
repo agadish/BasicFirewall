@@ -23,7 +23,7 @@ def is_bad_request(data):
     print('C keywords: %s, CPP keyboards: %s, ops: %s, braces: %s' % (number_of_c_keywords, number_of_cpp_keywords, number_of_operators, number_of_braces, ))
 
 
-    is_harmful = ((number_of_c_keywords > 5) or number_of_cpp_keywords >= 2) and number_of_operators >= 2 and number_of_braces >= 4
+    is_harmful = ((number_of_c_keywords > 5 and number_of_operators >= 2) or number_of_cpp_keywords >= 2) and number_of_braces >= 4
     print('Is harmful: %s' % (is_harmful, ))
     return is_harmful
 
